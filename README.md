@@ -209,7 +209,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-196 assertions against a throwaway bkn, a real HTTP provider that echoes its
+231 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -227,6 +227,39 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 | cli-feedback-spec | not yet |
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
+
+## Agents: autonomous runs
+
+A flow is a path someone designed. An agent is a model deciding what to do,
+on a schedule, with nobody watching:
+
+```sh
+ahub agent create --name nightly --assistant helper --every 6h \
+  --prompt "Check what changed and note anything worth following up." \
+  --tools memory_recall --memory-project machin
+
+ahub agent tick     # runs everything due; this is what a timer calls
+ahub agent runs --agent nightly
+```
+
+**Each run starts a fresh thread.** What carries forward is one bounded note —
+the **scratchpad** — that the agent writes itself through a `scratchpad` tool,
+and that a human can read or correct with `ahub agent scratchpad <name>`:
+
+```
+run 1: 2108 tokens   note: "Covered Machin's formula. Next run: a different angle."
+run 2: 2083 tokens   (fresh thread, note prepended)
+```
+
+Flat, not growing. That is the whole reason for the design: replaying an
+autonomous agent's history makes every run cost more than the last and
+eventually stop fitting, while a capped note cannot. Durable knowledge goes to
+memgraph via `memory_save`; the scratchpad is only "where I got to last time".
+
+`ahub agent tick` exits 105 if any agent failed, so a timer that always exits 0
+cannot hide a broken agent — and a failed run still advances the schedule,
+because an agent that stopped rescheduling when it broke would go quiet exactly
+when you needed it to keep complaining.
 
 ## Running a flow on a schedule
 
@@ -264,11 +297,12 @@ bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha2
 Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
 if you'd rather not use bkn for it.
 
-## What v0.5 is not
+## What v0.7 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
-in 2026), no sub-agents, no HITL, no scheduling, and no `loop` or `subflow`
-step yet. bkn already has `cron` and `hooks`, so triggering a flow on a
+in 2026), no evals, no sub-agents, no HITL, and no `loop` or `subflow` step
+yet. Evals are the next gap worth closing: nothing here can yet tell you
+whether a prompt, model or memory change made anything better. bkn already has `cron` and `hooks`, so triggering a flow on a
 schedule or a webhook is wiring, not engine work.
 
 What remains of

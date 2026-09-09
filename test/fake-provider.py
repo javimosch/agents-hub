@@ -78,9 +78,14 @@ class H(BaseHTTPRequestHandler):
                       for m in msgs if m["role"] == "system"))
         skl = int(any("## Skills" in m.get("content", "")
                       for m in msgs if m["role"] == "system"))
+        # Whether an agent's carried note arrived.
+        pad = int(any("Your notes from previous runs" in m.get("content", "")
+                      for m in msgs if m["role"] == "system"))
+        users = sum(1 for m in msgs if m["role"] == "user")
         tool_out = " | ".join(m.get("content", "")[:40] for m in msgs if m["role"] == "tool")
-        text = (f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} "
-                f"tools={len(req.get('tools') or [])} toolout={tool_out} echo={last}")
+        text = (f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} pad={pad} "
+                f"users={users} tools={len(req.get('tools') or [])} "
+                f"toolout={tool_out} echo={last}")
         usage = {"prompt_tokens": len(msgs), "completion_tokens": 7, "total_tokens": len(msgs) + 7}
 
         if req.get("stream"):

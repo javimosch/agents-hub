@@ -78,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares every collection" "5"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "7"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -480,6 +480,80 @@ json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/boomflow.jso
 a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+
+# --- agents (autonomous runs) ----------------------------------------------
+# An agent is a standing instruction: run this assistant on this schedule with
+# nobody watching. What carries between runs is a bounded scratchpad, never
+# the conversation -- replayed history would make every run cost more than the
+# last and eventually stop fitting.
+chk "an agent needs a prompt"         "82"      "$(code agent create --name a1 --assistant helper)"
+chkin "and says why"                  "burns tokens" "$(errj error.message)"
+chk "every and at are exclusive"      "82"      "$(code agent create --name a2 --assistant helper --prompt p --every 1h --at 03:00)"
+chk "a bad time of day is refused"    "85"      "$(code agent create --name a3 --assistant helper --prompt p --at 25:99)"
+chk "a sub-minute interval is refused" "85"     "$(code agent create --name a4 --assistant helper --prompt p --every 5s)"
+
+AG="$(a agent create --name nightly --assistant helper --prompt "check the port" --every 6h)"
+chk "create schedules the first run"  "True"    "$(printf '%s' "$AG" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["agent"]["next_run_at"]))')"
+chk "and it is enabled"               "True"    "$(printf '%s' "$AG" | j agent.enabled)"
+chk "it is listed"                    "nightly" "$(a agent list | j agents.0.name)"
+chk "nothing is due yet"              "0"       "$(a agent due | j count)"
+
+R1="$(a agent run nightly)"
+chk "a manual run works"              "ok"      "$(printf '%s' "$R1" | j status)"
+chk "it is recorded"                  "1"       "$(a agent runs --agent nightly | j count)"
+chk "the trigger is recorded"         "manual"  "$(a agent runs --agent nightly | j runs.0.trigger)"
+chkin "the scratchpad tool is always offered" "tools=1" "$(printf '%s' "$R1" | j answer)"
+chkin "and the run starts a fresh thread" "users=1" "$(printf '%s' "$R1" | j answer)"
+chkin "with no note to carry yet"     "pad=0"   "$(printf '%s' "$R1" | j answer)"
+
+# The model writes its own note; the next run receives it.
+tool_mode '{"tool":"scratchpad","args":"{\"text\":\"port released cleanly; check the backoff next\"}"}'
+R2="$(a agent run nightly)"
+chk "the agent wrote its note"        "True"    "$(printf '%s' "$R2" | j scratchpad_written)"
+chkin "the note is stored"            "check the backoff next" "$(a agent scratchpad nightly | j scratchpad)"
+tool_mode '{"tool":null,"args":"{\"query\":\"ports\"}"}'
+R3="$(a agent run nightly)"
+chkin "the next run carries it"       "pad=1"   "$(printf '%s' "$R3" | j answer)"
+chkin "and still replays no history"  "users=1" "$(printf '%s' "$R3" | j answer)"
+
+# A human can read and correct it: it is the one piece of an autonomous
+# agent's state that is meant to be legible.
+chk "a human can set it"              "True"    "$(a agent scratchpad nightly --set "corrected by hand" | j written)"
+chk "and read it back"                "corrected by hand" "$(a agent scratchpad nightly | j scratchpad)"
+chk "and clear it"                    "True"    "$(a agent scratchpad nightly --clear | j cleared)"
+chk "clearing leaves nothing"         "0"       "$(a agent scratchpad nightly | j chars)"
+
+# Scheduling: tick is what a timer calls, and it is the only entry point.
+a agent create --name frequent --assistant helper --prompt "tick me" --every 1m >/dev/null
+a agent scratchpad frequent --set "x" >/dev/null
+python3 -c "
+import json,subprocess,sys
+" # (no-op: the due time is set in the past below through the API)
+DUEID="$(a agent show frequent | j agent.id)"
+curl -s -X PATCH -H "Authorization: Bearer $(python3 -c "
+import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/agents/$DUEID" >/dev/null
+chk "an overdue agent is due"         "frequent" "$(a agent due | j due.0)"
+TICK="$(a agent tick)"
+chk "tick runs it"                    "1"       "$(printf '%s' "$TICK" | j ran)"
+chk "and reports no failures"         "0"       "$(printf '%s' "$TICK" | j failed)"
+chk "the trigger says schedule"       "schedule" "$(a agent runs --agent frequent | j runs.0.trigger)"
+chk "and it is no longer due"         "0"       "$(a agent due | j count)"
+
+# A disabled agent never becomes due, whatever its schedule says.
+a agent disable frequent >/dev/null
+curl -s -X PATCH -H "Authorization: Bearer $(python3 -c "
+import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/agents/$DUEID" >/dev/null
+chk "a disabled agent is not due"     "0"       "$(a agent due | j count)"
+chk "re-enabling re-arms it"          "True"    "$(a agent enable frequent | j agent.enabled)"
+chk "and does not fire for missed slots" "0"    "$(a agent due | j count)"
+
+# A failing run is recorded and the schedule still advances: an agent that
+# stopped rescheduling when it broke would go quiet exactly when it mattered.
+a agent create --name broken --assistant no-such-assistant --prompt p --every 1h >/dev/null
+chk "a broken agent fails loudly"     "105"     "$(code agent run broken)"
+chk "and is typed"                    "agent_run_failed" "$(err_type)"
+chk "the failure is recorded"         "failed"  "$(a agent runs --agent broken | j runs.0.status)"
+chk "and it is still scheduled"       "True"    "$(a agent show broken | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["agent"]["next_run_at"]))')"
 
 # --- install / update ------------------------------------------------------
 # cli-update-spec: a binary already in hand relocates itself, and updates

@@ -7,7 +7,8 @@
     "what_it_is_not": "Not a chat UI and not a daemon. No RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text. No sub-agents, HITL or workflows yet.",
     "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them.",
     "tools": "An assistant may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per assistant or per call, every one is backed by memgraph, and anything that writes needs --allow-writes as well.",
-    "flows": "A flow is a path expressed as data: steps, a start, and where each goes next. Most step types cost nothing -- collect a value, branch on it, run an allowlisted CLI, call an allowlisted host -- and exactly one (ask) calls a model. A run pauses when it needs input and is resumed by id, so a wizard works in a tool that must never prompt."
+    "flows": "A flow is a path expressed as data: steps, a start, and where each goes next. Most step types cost nothing -- collect a value, branch on it, run an allowlisted CLI, call an allowlisted host -- and exactly one (ask) calls a model. A run pauses when it needs input and is resumed by id, so a wizard works in a tool that must never prompt.",
+    "agents": "An agent is a standing instruction: run this assistant, on this schedule, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying an autonomous agent's history would make every run cost more than the last and eventually stop fitting; a note cannot."
   },
   "loop": [
     {
@@ -73,6 +74,14 @@
     {
       "command": "ahub update [--check]",
       "why": "Fetch the published build. The version is sha256[:12] of the artifact, so there is no number to bump: identical bytes are the same version."
+    },
+    {
+      "command": "ahub agent create --name nightly --assistant helper --prompt \"...\" --every 6h",
+      "why": "A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub agent run <name>`."
+    },
+    {
+      "command": "ahub agent tick",
+      "why": "Runs everything that is due. This is what a timer calls: one entry point, however many agents, no daemon holding state between them."
     }
   ],
   "concepts": [
@@ -135,6 +144,14 @@
     {
       "name": "scheduled flows",
       "what": "A flow plus a systemd timer is the whole of autonomy: `ahub flow run <name>` on a schedule, no daemon and no user in the loop. The flow exits non-zero when a step fails, so a failure shows up in `systemctl list-units --failed`, and every run is recorded in bkn where `ahub flow runs` can read it back."
+    },
+    {
+      "name": "the scratchpad",
+      "what": "One bounded note (4000 chars) carried between runs, written by the agent through the scratchpad tool and readable or correctable by a human with `ahub agent scratchpad <name>`. Durable knowledge goes to memgraph via memory_save instead; the scratchpad is only 'where I got to last time'."
+    },
+    {
+      "name": "agent vs flow",
+      "what": "A flow is a path someone designed and pays only for its ask steps. An agent is a model deciding what to do, on a schedule, and pays every run. Reach for a flow when the sequence is known; an agent when it is not."
     }
   ],
   "gotchas": [
@@ -161,7 +178,12 @@
     "bkn answers a script you may not run exactly as it answers one that does not exist, so that 404s cannot enumerate what an operator installed. A refusal therefore names both possibilities; it is not being vague, it genuinely cannot tell you which.",
     "A bkn script that runs and throws is a RESULT, not a transport failure: the step sets <var>_code=1 and takes on_error, so a flow can handle it.",
     "update verifies the download against the advertised hash AND runs it before swapping. A hash mismatch or a binary that will not run exits 110 and leaves the working binary untouched -- neither is worth retrying, because the published bytes are wrong.",
-    "A machine account needs a credential that outlives its tokens: the refresh token is good for 30 days, so a timer that runs at least monthly never needs the password again, and one that lapses does."
+    "A machine account needs a credential that outlives its tokens: the refresh token is good for 30 days, so a timer that runs at least monthly never needs the password again, and one that lapses does.",
+    "An agent run never replays previous runs. If it needs to remember something, it must write the scratchpad or save a memory -- and it can only do that if it was given the tools.",
+    "The scratchpad tool is always offered inside an agent run and is not subject to --allow-writes: it can only overwrite that one agent's own note, which the agent is the sole author of.",
+    "A failed run still advances the schedule. An agent that stopped rescheduling when it broke would go quiet exactly when you needed it to keep complaining.",
+    "`ahub agent tick` exits 105 if any agent failed, so a timer that always exits 0 does not hide a broken agent. The successful runs are recorded either way.",
+    "Re-enabling a disabled agent computes a fresh due time rather than firing once for every slot it slept through."
   ],
   "recipes": [
     {
@@ -199,6 +221,10 @@
     {
       "command": "ahub flow run bkn-backup && ahub flow runs --flow bkn-backup --limit 5",
       "why": "Run a scheduled flow by hand and read its history back out of bkn."
+    },
+    {
+      "command": "ahub agent run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'",
+      "why": "What one autonomous run did, and what it cost."
     }
   ],
   "see_also": {

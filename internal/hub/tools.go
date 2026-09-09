@@ -53,6 +53,20 @@ func (r *Registry) Specs() []provider.Tool {
 	return out
 }
 
+// With returns a registry carrying one extra tool. The copy matters: the
+// scratchpad tool is bound to one agent, and a shared registry would let a
+// later run write into an earlier agent's note.
+func (r *Registry) With(name string, t Tool) *Registry {
+	out := &Registry{tools: map[string]Tool{}}
+	if r != nil {
+		for k, v := range r.tools {
+			out.tools[k] = v
+		}
+	}
+	out.tools[name] = t
+	return out
+}
+
 func (r *Registry) get(name string) (Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok

@@ -58,6 +58,8 @@ func main() {
 		toolCmd(fl)
 	case "flow":
 		flowCmd(fl)
+	case "agent":
+		agentCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -118,6 +120,10 @@ func hubFor(fl *flags) (*hub.Hub, Config) {
 	return hub.New(c), cfg
 }
 
+// isBackend reports whether an error came from bkn rather than from this
+// tool's own validation, so the two can take different exit codes.
+func isBackend(err error) bool { return bkn.FromBackend(err) }
+
 // fail maps a bkn error onto the spec's exit codes. Every command funnels
 // backend errors through here so the same failure always exits the same way.
 func fail(err error, what string) {
@@ -174,6 +180,10 @@ func usage() {
   ahub flow run <name> [--input k=v]               run it; pauses when it needs input
   ahub flow resume <run-id> --input k=v            continue a paused run
   ahub flow list|show|rm|runs
+
+  ahub agent create --name <n> --assistant <a> --prompt <p> [--every 6h|--at 03:20]
+  ahub agent run <name> | due | tick    tick runs everything due; a timer calls it
+  ahub agent list|show|rm|enable|disable|runs|scratchpad
 
   ahub install [--prefix <dir>]         put this binary on $PATH
   ahub update [--check] [--force]       fetch the published build

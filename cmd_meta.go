@@ -27,6 +27,7 @@ func helpJSON() {
 			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
 			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"uninstall": cmd([]string{}, []string{"--prefix <dir>"}, false),
+			"agent":     cmd([]string{"create|list|show|rm|enable|disable|run|due|tick|runs|scratchpad", "[name]"}, []string{"--name <n>", "--assistant <a>", "--prompt <p>", "--every <dur>", "--at <HH:MM>", "--tools <a,b>", "--skills <a,b>", "--memory-project <p>", "--max-steps <n>", "--timeout <s>", "--set <text>", "--clear", "--status <s>", "--limit <n>"}, true),
 			"flow":      cmd([]string{"validate|create|list|show|rm|run|resume|runs", "[name-or-run-id]"}, []string{"--file <path>", "--input <k=v> (repeatable)", "--max-steps <n>", "--step-timeout <s>", "--status <s>", "--limit <n>"}, true),
 			"skill":     cmd([]string{"search|recommend|show", "[name-or-text]"}, []string{"--query <q>", "--task <t>", "--limit <n>"}, false),
 			"guide":     cmd([]string{}, []string{"--human"}, false),
