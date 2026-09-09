@@ -1,0 +1,121 @@
+{
+  "name": "log-budget",
+  "description": "Keep the systemd journal under a budget. Reports by default; --input mode=enforce vacuums. No ask step, so llm_calls is always 0.",
+  "inputs": [
+    "mode"
+  ],
+  "start": "budget",
+  "steps": {
+    "budget": {
+      "type": "set",
+      "var": "budget",
+      "value": "314572800",
+      "next": "keep"
+    },
+    "keep": {
+      "type": "set",
+      "var": "keep",
+      "value": "250M",
+      "next": "measure"
+    },
+    "measure": {
+      "type": "cmd",
+      "command": "journalctl",
+      "args": [
+        "--disk-usage"
+      ],
+      "var": "human",
+      "next": "size",
+      "on_error": "no_journal"
+    },
+    "size": {
+      "type": "cmd",
+      "command": "du",
+      "args": [
+        "-sb",
+        "/var/log/journal"
+      ],
+      "var": "used",
+      "next": "check",
+      "on_error": "no_journal"
+    },
+    "check": {
+      "type": "conditional",
+      "when": [
+        {
+          "var": "used",
+          "op": "gt",
+          "value": "{{budget}}",
+          "next": "over"
+        }
+      ],
+      "else": "within"
+    },
+    "within": {
+      "type": "message",
+      "text": "within budget: {{human}}",
+      "next": "done"
+    },
+    "over": {
+      "type": "conditional",
+      "when": [
+        {
+          "var": "mode",
+          "op": "eq",
+          "value": "enforce",
+          "next": "vacuum"
+        }
+      ],
+      "else": "warn"
+    },
+    "warn": {
+      "type": "message",
+      "text": "OVER BUDGET: {{human}} against a {{budget}}-byte budget. Nothing was deleted; re-run with --input mode=enforce to vacuum to {{keep}}.",
+      "next": "over_end"
+    },
+    "vacuum": {
+      "type": "cmd",
+      "command": "journalctl",
+      "args": [
+        "--vacuum-size={{keep}}"
+      ],
+      "var": "vacuumed",
+      "next": "after",
+      "on_error": "vacuum_failed"
+    },
+    "after": {
+      "type": "cmd",
+      "command": "journalctl",
+      "args": [
+        "--disk-usage"
+      ],
+      "var": "now",
+      "next": "report"
+    },
+    "report": {
+      "type": "message",
+      "text": "vacuumed to {{keep}}: was {{human}}, now {{now}}",
+      "next": "done"
+    },
+    "no_journal": {
+      "type": "message",
+      "text": "cannot read the journal: {{human_err}}{{used_err}}",
+      "next": "bad"
+    },
+    "vacuum_failed": {
+      "type": "message",
+      "text": "vacuum failed: {{vacuumed_err}}",
+      "next": "bad"
+    },
+    "done": {
+      "type": "end"
+    },
+    "over_end": {
+      "type": "end"
+    },
+    "bad": {
+      "type": "end",
+      "status": "failed"
+    }
+  }
+}

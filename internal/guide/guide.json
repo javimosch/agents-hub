@@ -192,6 +192,10 @@
     {
       "name": "compaction",
       "what": "Folds the older half of a thread into a summary stored on the thread. The messages are never deleted: replay skips what the summary covers, but the record of what was said survives for anyone who later needs to know why an agent did something."
+    },
+    {
+      "name": "how deterministic a flow is",
+      "what": "The control flow is: no step but ask calls a model, the operators are a closed set, first match wins, and an unset {{variable}} fails the step rather than substituting empty. A run reports llm_calls and tokens, so 'this costs nothing' is checkable rather than claimed. What is NOT deterministic is what the commands say -- that is the point of asking them."
     }
   ],
   "gotchas": [
@@ -235,7 +239,9 @@
     "A job's exit code survives because the process ahub spawns is ahub itself, supervising the command. Spawning the command directly would leave nobody to reap it once the turn exits.",
     "Compaction is reported on the turn that did it (`compaction` in the answer), never silent. A conversation that quietly lost its middle would be impossible to debug.",
     "A thread is folded at most once per prompt size: if folding did not shrink the prompt, the size is coming from somewhere a summary cannot reach -- a large system prompt, a recalled block -- and folding again would cost another summarisation for nothing.",
-    "When a prompt cannot be made to fit at all, the error is exit 85 prompt_too_large rather than a retryable provider error, because the same prompt will not fit next time either."
+    "When a prompt cannot be made to fit at all, the error is exit 85 prompt_too_large rather than a retryable provider error, because the same prompt will not fit next time either.",
+    "A flow has no arithmetic. It can COMPARE numbers (gt/lt read the leading number, so `du -sb` output compares straight against a budget) but it cannot compute one. If you need a calculation, do it in the command.",
+    "A conditional reads its variable by name, so an unset one compares as empty rather than failing the way a template does. Declare optional variables in the flow's `inputs` list; anything else that no step sets is reported by validate."
   ],
   "recipes": [
     {
@@ -281,6 +287,10 @@
     {
       "command": "ahub config set --allow-tool-cmd 'gh pr list' && ahub chat --agent helper --tools cmd --message 'what PRs are open?'",
       "why": "An agent reaching a real system, through a command shape you chose."
+    },
+    {
+      "command": "ahub flow run log-budget   # measure, branch, act; llm_calls: 0",
+      "why": "An ops flow with no model in it at all: measure the journal, compare against a budget, vacuum only when told to."
     }
   ],
   "see_also": {

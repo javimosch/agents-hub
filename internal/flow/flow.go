@@ -110,13 +110,17 @@ type Step struct {
 
 // Flow is a whole definition.
 type Flow struct {
-	ID          string          `json:"id,omitempty"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Start       string          `json:"start"`
-	Steps       map[string]Step `json:"steps"`
-	CreatedAt   string          `json:"created_at,omitempty"`
-	UpdatedAt   string          `json:"updated_at,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Inputs are the variables a caller may supply with --input. Declaring
+	// them makes a flow readable without tracing every step, and stops the
+	// validator reporting an intentional input as a variable nothing sets.
+	Inputs    []string        `json:"inputs,omitempty"`
+	Start     string          `json:"start"`
+	Steps     map[string]Step `json:"steps"`
+	CreatedAt string          `json:"created_at,omitempty"`
+	UpdatedAt string          `json:"updated_at,omitempty"`
 }
 
 // Parse reads a definition.
@@ -226,6 +230,9 @@ func Validate(f *Flow, allowedCmds, allowedHosts []string) []Problem {
 	// purpose: it walks in name order rather than following every path, so it
 	// warns rather than blocks.
 	set := map[string]bool{}
+	for _, in := range f.Inputs {
+		set[in] = true
+	}
 	for _, name := range names {
 		s := f.Steps[name]
 		if s.Var == "" {
@@ -241,6 +248,14 @@ func Validate(f *Flow, allowedCmds, allowedHosts []string) []Problem {
 		}
 	}
 	for _, name := range names {
+		// A conditional reads its variable by name rather than by template,
+		// so it is checked separately -- otherwise a typo compares against
+		// the empty string forever and the branch simply never fires.
+		for _, b := range f.Steps[name].When {
+			if b.Var != "" && !set[b.Var] {
+				add(name, "branches on "+b.Var+", which no step sets", false)
+			}
+		}
 		for _, ref := range Refs(f.Steps[name]) {
 			if strings.HasPrefix(ref, "secret.") || strings.HasPrefix(ref, "input.") {
 				continue

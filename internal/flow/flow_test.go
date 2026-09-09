@@ -183,3 +183,49 @@ func TestSecretsAreRedacted(t *testing.T) {
 		t.Fatalf("secret survived redaction: %q", red)
 	}
 }
+
+// Numeric comparison reads the leading number, which is what lets the output
+// of `du -sb` ("1157660672\t/var/log/journal") be compared directly against a
+// budget. This is relied on by any flow that measures something, so it is
+// pinned here rather than left as an accident of the parser.
+func TestNumericCompareReadsLeadingNumber(t *testing.T) {
+	f := mustParse(t, `{"name":"n","start":"c","steps":{
+		"c":{"type":"conditional","when":[{"var":"used","op":"gt","value":"1000"}],"else":"small"},
+		"big":{"type":"message","text":"over","next":"end"},
+		"small":{"type":"message","text":"under","next":"end"},
+		"end":{"type":"end"}}}`)
+	f.Steps["c"].When[0].Next = "big"
+	c := f.Steps["c"]
+	c.When[0].Next = "big"
+	f.Steps["c"] = c
+
+	e := &Engine{Flow: f}
+	run := NewRun(f, map[string]string{"used": "1157660672\t/var/log/journal"})
+	e.Start(context.Background(), run)
+	if run.Status != StatusCompleted || run.Messages[0] != "over" {
+		t.Fatalf("du output did not compare numerically: %s / %v", run.Status, run.Messages)
+	}
+
+	run = NewRun(f, map[string]string{"used": "12\t/tmp/small"})
+	e.Start(context.Background(), run)
+	if run.Messages[0] != "under" {
+		t.Fatalf("small value compared wrong: %v", run.Messages)
+	}
+}
+
+// A conditional that branches on a variable nothing sets would compare against
+// the empty string forever, so the validator says so.
+func TestValidateWarnsOnUnsetBranchVariable(t *testing.T) {
+	f := mustParse(t, `{"name":"n","start":"c","steps":{
+		"c":{"type":"conditional","when":[{"var":"moed","op":"eq","value":"enforce","next":"a"}],"else":"a"},
+		"a":{"type":"end"}}}`)
+	found := false
+	for _, p := range Validate(f, nil, nil) {
+		if strings.Contains(p.Message, "branches on moed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a typo in a conditional variable went unreported")
+	}
+}

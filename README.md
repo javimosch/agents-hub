@@ -202,6 +202,28 @@ exactly like one that does not exist — deliberately, so 404s cannot enumerate
 what an operator installed — which is why the refusal here names both
 possibilities rather than guessing.
 
+### How deterministic is it?
+
+The control flow is: no step but `ask` calls a model, the operators are a
+closed set with first-match-wins, an unset `{{variable}}` fails the step rather
+than substituting empty, and arguments are argv. A run reports `llm_calls` and
+`tokens`, so "this costs nothing" is checkable rather than claimed.
+
+What isn't deterministic is what the commands say — that's the point of asking
+them. A worked example, keeping the systemd journal under 300 MB:
+
+```
+path:   budget -> keep -> measure -> size -> check -> over -> warn -> over_end
+cost:   llm_calls=0 tokens=0 steps=8
+```
+
+Two limits worth knowing. A flow has **no arithmetic** — it can compare numbers
+(`gt`/`lt` read the leading number, so `du -sb` output compares straight against
+a budget) but not compute one; do the calculation in the command. And a
+conditional reads its variable *by name*, so an unset one compares as empty
+rather than failing the way a template does — declare optional ones in the
+flow's `inputs` list, and `validate` reports anything else no step sets.
+
 `ahub flow validate` is the cheap win. Because the path is data, unknown
 targets, unreachable steps, variables nothing sets and commands this machine
 will refuse are all findable before a run spends a cent.
