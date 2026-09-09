@@ -1,6 +1,6 @@
 {
   "name": "log-budget",
-  "description": "Keep the systemd journal under a budget. Reports by default; --input mode=enforce vacuums. No ask step, so llm_calls is always 0.",
+  "description": "Keep the systemd journal under a budget. Reports by default; --input mode=enforce vacuums and then VERIFIES the effect, because journalctl exits 0 even when it could not delete anything. No ask step, so llm_calls is always 0.",
   "inputs": [
     "mode"
   ],
@@ -85,12 +85,13 @@
     },
     "after": {
       "type": "cmd",
-      "command": "journalctl",
+      "command": "du",
       "args": [
-        "--disk-usage"
+        "-sb",
+        "/var/log/journal"
       ],
-      "var": "now",
-      "next": "report"
+      "var": "after_bytes",
+      "next": "verify"
     },
     "report": {
       "type": "message",
@@ -116,6 +117,32 @@
     "bad": {
       "type": "end",
       "status": "failed"
+    },
+    "verify": {
+      "type": "conditional",
+      "when": [
+        {
+          "var": "after_bytes",
+          "op": "gt",
+          "value": "{{budget}}",
+          "next": "no_effect"
+        }
+      ],
+      "else": "measure_again"
+    },
+    "measure_again": {
+      "type": "cmd",
+      "command": "journalctl",
+      "args": [
+        "--disk-usage"
+      ],
+      "var": "now",
+      "next": "report"
+    },
+    "no_effect": {
+      "type": "message",
+      "text": "vacuum ran and exited 0 but freed nothing: still {{after_bytes}} bytes against a {{budget}}-byte budget. Deleting system journals needs root -- run this flow as root, or allow 'sudo journalctl'. stderr was: {{vacuumed_err}}",
+      "next": "bad"
     }
   }
 }
