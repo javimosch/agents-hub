@@ -186,7 +186,8 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 	if err != nil {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error())
 	}
-	opts := hub.RunScheduleOptions{Schedule: a, Provider: p, Trigger: trigger}
+	opts := hub.RunScheduleOptions{Schedule: a, Provider: p, Trigger: trigger,
+		Compact: compactionFor(fl, cfg)}
 
 	// memgraph is needed only if this agent asked for tools, skills or a
 	// memory project. An agent that asked for none must still run on a
@@ -213,6 +214,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 					Names: a.Tools, Memory: mc, Project: a.MemoryProject,
 					AllowWrites: fl.has("allow-writes"),
 					ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+					Hub: h,
 				})
 				if err != nil {
 					out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")

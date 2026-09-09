@@ -78,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares every collection" "9"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "10"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -231,7 +231,7 @@ chkin "and it says why"               "not markdown" "$(errj error.message)"
 # --- tools -----------------------------------------------------------------
 # The fake model asks for one tool, then answers with the result in its
 # history: the same two-pass shape a real model produces.
-chk "the catalog needs nothing"       "5"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
+chk "the catalog needs nothing"       "8"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
 chk "the catalog marks what writes"   "memory_save" "$("$AHUB" tool list | python3 -c 'import json,sys;print(",".join(t["name"] for t in json.load(sys.stdin)["tools"] if t["writes"]))')"
 chk "an unknown tool is refused"      "85"      "$(code chat --agent helper --tools no_such_tool --message x)"
 chkin "and it lists the real ones"    "memory_recall" "$(errj error.message)"
@@ -273,6 +273,7 @@ chkin "and it says how to resume"     "--max-steps 20" "$(errj error.suggestions
 # A tool called with a missing required parameter is told which one, rather
 # than being handed whatever error an empty string produces downstream.
 tool_mode() { curl -sf -X POST "$P/control/tool" -d "$1" >/dev/null; }
+reply_mode() { curl -sf -X POST "$P/control/reply" -d "$1" >/dev/null; }
 tool_mode '{"args":"{\"nope\":\"x\"}"}'
 MA="$(a chat --agent helper --tools memory_recall --message x)"
 chkin "a missing parameter is named"  "requires the parameter" "$(printf '%s' "$MA" | j content)"
@@ -534,10 +535,106 @@ tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"nomem\"
 chkin "cmd works without memgraph"    "hello nomem" "$(AHUB_MEMGRAPH=/nonexistent a chat --agent helper --tools cmd --message x | j content)"
 tool_mode '{"args":"{\"query\":\"ports\"}"}'
 
+# --- background jobs --------------------------------------------------------
+# A turn cannot wait: a test suite or a deploy outlives the provider timeout.
+# A job outlives the process that started it, which is also what lets a
+# schedule begin something and a later run collect it.
+a config set --allow-tool-cmd "seq" --allow-tool-cmd "sleep" >/dev/null
+chk "adding a permitted command twice is fine" "0" "$(code config set --allow-tool-cmd seq)"
+
+JB="$(a job start --command seq --args 3)"
+JID="$(printf '%s' "$JB" | j job.id)"
+chk "a job starts and is recorded"    "True"    "$([ -n "$JID" ] && echo True || echo False)"
+chk "it is listed"                    "$JID"    "$(a job list --limit 1 | j jobs.0.id)"
+JW="$(a job wait "$JID" --timeout 20)"
+chk "it finishes"                     "exited"  "$(printf '%s' "$JW" | j status)"
+chk "with an exit code"               "0"       "$(printf '%s' "$JW" | j exit_code)"
+chkin "and its output is captured"    "3"       "$(printf '%s' "$JW" | j output)"
+chk "output survives the process that started it" "True" "$(a job output "$JID" | python3 -c 'import json,sys;print("1" in json.load(sys.stdin)["output"])')"
+
+# The same allowlist as the cmd tool: a human starting a job by hand is bound
+# by what this machine permits a model to run.
+chk "an unpermitted job is refused"   "85"      "$(code job start --command "rm -rf")"
+chkin "and says how to permit it"     "not permitted" "$(errj error.message)"
+
+# Waiting is bounded, and "still running" is not a failure.
+SL="$(a job start --command sleep --args 30 | j job.id)"
+chk "a slow job is still running"     "92"      "$(code job wait "$SL" --timeout 1)"
+chk "and says so"                     "still_running" "$(err_type)"
+chk "it can be stopped"               "True"    "$(a job stop "$SL" | j stopped)"
+chk "and reads as stopped"            "stopped" "$(a job show "$SL" | j job.status)"
+
+# The model-facing verbs.
+tool_mode '{"tool":"job_start","args":"{\"command\":\"seq\",\"args\":[\"2\"]}"}'
+JT="$(a chat --agent helper --tools job_start --message "start it")"
+chkin "a model can start one"         "Started job" "$(printf '%s' "$JT" | j content)"
+chk "and it is recorded against the thread" "True" "$(a job list --limit 1 | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["jobs"][0].get("thread")))')"
+tool_mode '{"args":"{\"query\":\"ports\"}"}'
+
+# --- context compaction -----------------------------------------------------
+# Threads grow. The precise signal is already in hand -- every response reports
+# prompt_tokens -- so the threshold is measured, not estimated.
+ctx_mode() { curl -sf -X POST "$P/control/context" -d "$1" >/dev/null; }
+
+ctx_mode '{"prompt_tokens":900}'
+a config set --model-limit m1=1000 --compact-at 0.6 >/dev/null
+chk "the limit is remembered"         "1000"    "$(a config show | python3 -c 'import json,sys;print(json.load(sys.stdin)["config"]["model_limits"]["m1"])')"
+CT="$(a chat --agent helper --message "first turn" | j thread)"
+chk "the measured prompt is stored"   "900"     "$(a thread show "$CT" | j thread.last_prompt_tokens)"
+for i in 2 3 4 5 6; do a chat --agent helper --thread "$CT" --message "turn $i" >/dev/null; done
+chk "the thread was folded"           "True"    "$(a thread show "$CT" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["thread"].get("summary")))')"
+chk "and it says how far"             "True"    "$(a thread show "$CT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["thread"].get("summary_seq",0) > 0)')"
+chk "nothing was deleted"             "True"    "$(a thread show "$CT" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["count"] > d["thread"]["summary_seq"])')"
+
+# Once folding stops helping it stops happening -- otherwise every later turn
+# would pay for another summary forever.
+BEFORE_SEQ="$(a thread show "$CT" | j thread.summary_seq)"
+a chat --agent helper --thread "$CT" --message "another" >/dev/null
+a chat --agent helper --thread "$CT" --message "and another" >/dev/null
+chk "it does not fold again pointlessly" "$BEFORE_SEQ" "$(a thread show "$CT" | j thread.summary_seq)"
+
+# --no-compact leaves a thread alone.
+NC="$(a chat --agent helper --no-compact --message "solo" | j thread)"
+for i in 2 3 4 5 6; do a chat --agent helper --no-compact --thread "$NC" --message "turn $i" >/dev/null; done
+chk "--no-compact never folds"        "False"   "$(a thread show "$NC" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["thread"].get("summary")))')"
+
+# The backstop: the provider refuses, the window is learned, the thread folds,
+# and the turn is retried once.
+a agent create --name learner --model learn-model --system short >/dev/null
+ctx_mode '{"limit":2000,"prompt_tokens":20}'
+# The echoing provider would return the whole fold as its "summary", which is
+# larger than what it replaced. A real summariser summarises, so this one is
+# told to answer briefly for the duration of the scenario.
+reply_mode '{"reply":"notes: the conversation covered several turns."}'
+PAD="$(python3 -c 'print("sentence that takes up room. "*40)')"
+LT="$(a chat --agent learner --message first | j thread)"
+# Somewhere in here the prompt stops fitting. The turn that hits it should
+# still answer, and should say the provider is why it folded -- so the loop
+# keeps whichever turn reported that.
+# Every turn is expected to answer: whichever one stops fitting should fold
+# and retry rather than fail. Which iteration that is depends on the fake
+# tokeniser, so the assertion is on the outcome, not on the turn number.
+FAILED=0
+for i in $(seq 2 14); do
+  a chat --agent learner --thread "$LT" --message "turn $i: $PAD" >/dev/null 2>&1 || FAILED=$((FAILED+1))
+done
+chk "no turn was lost to the window"  "0"       "$FAILED"
+chk "the thread was folded"           "True"    "$(a thread show "$LT" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["thread"].get("summary")))')"
+chk "and the fold is recorded"        "True"    "$(a thread show "$LT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["thread"].get("compacted_at_prompt",0) > 0)')"
+chk "the window was learned"          "2000"    "$(a config show | python3 -c 'import json,sys;print(json.load(sys.stdin)["config"]["model_limits"].get("learn-model"))')"
+reply_mode '{"reply":null}'
+
+# A window smaller than the fixed parts cannot be rescued, and says so rather
+# than inviting a retry that will fail identically.
+a agent create --name toobig --model tiny-model --system "$(python3 -c 'print("padding. "*200)')" >/dev/null
+ctx_mode '{"limit":120,"prompt_tokens":50}'
+chk "an unfittable prompt is typed"   "85"      "$(code chat --agent toobig --message hello)"
+chk "and named"                       "prompt_too_large" "$(err_type)"
+chkin "with what would actually help" "system prompt" "$(errj error.suggestions.0)"
+ctx_mode '{"limit":0,"prompt_tokens":0}'
+
 # --- evals -----------------------------------------------------------------
 # The measurement half. Without it every other change here is an opinion.
-reply_mode() { curl -sf -X POST "$P/control/reply" -d "$1" >/dev/null; }
-
 cat > "$WORK/quality.json" <<'EVAL'
 {
   "name": "quality",

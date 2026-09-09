@@ -10,7 +10,9 @@
     "agents": "An agent is a saved configuration: a system prompt, a model, and optionally a memory project, skills and tools. It is the noun this tool is named after. `ahub chat --agent <name>` talks to one; a flow's ask step calls one; a schedule runs one unattended.",
     "schedules": "A schedule is a standing instruction: run this agent, on this cadence, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying history would make every run cost more than the last and eventually stop fitting; a note cannot.",
     "what_it_is": "An agent is a saved prompt + model. A thread is a conversation with one agent. A chat is one turn. A flow is a deterministic path. A schedule runs an agent unattended.",
-    "evals": "An eval is a set of cases with assertions, run against an agent, producing a pass rate and a cost. It is how a prompt, model, memory or tool change stops being an opinion. Most assertions are free to check; exactly one (judge) asks a model, and the report says how much that cost."
+    "evals": "An eval is a set of cases with assertions, run against an agent, producing a pass rate and a cost. It is how a prompt, model, memory or tool change stops being an opinion. Most assertions are free to check; exactly one (judge) asks a model, and the report says how much that cost.",
+    "jobs": "A job is a permitted command running outside the turn that started it. A turn cannot wait: a test suite or a deploy outlives the provider timeout. A job survives the process that began it, so a schedule can start something and a later run collect it.",
+    "compaction": "Threads grow. Every response reports prompt_tokens, so the size is measured rather than estimated, and a thread is folded into a summary once it crosses a fraction of the model's window (60% by default). If the provider refuses a prompt anyway, the window it names is learned and written to the profile, the thread is folded, and the turn is retried once."
   },
   "loop": [
     {
@@ -96,6 +98,10 @@
     {
       "command": "ahub eval compare <before> <after>",
       "why": "The only question that matters after a change: what got fixed, what regressed, what still fails, and what it cost."
+    },
+    {
+      "command": "ahub job start --command 'gh pr list' && ahub job wait <id>",
+      "why": "Work that outlives a turn. job list, job output and job stop are there too."
     }
   ],
   "concepts": [
@@ -178,6 +184,14 @@
     {
       "name": "the cmd tool",
       "what": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and may append arguments; it can never change the prefix, so allowing 'git log' does not allow 'git push'. Empty by default, which means the tool does not exist until someone permits something."
+    },
+    {
+      "name": "jobs",
+      "what": "Started through the same prefix allowlist as the cmd tool, so a human starting one by hand is bound by what this machine permits a model to run. A model gets three verbs -- job_start, job_wait, job_output -- and cannot list or stop work it did not begin."
+    },
+    {
+      "name": "compaction",
+      "what": "Folds the older half of a thread into a summary stored on the thread. The messages are never deleted: replay skips what the summary covers, but the record of what was said survives for anyone who later needs to know why an agent did something."
     }
   ],
   "gotchas": [
@@ -217,7 +231,11 @@
     "A judge assertion with no judge configured FAILS rather than passing: a check that silently becomes a no-op is worse than no check.",
     "The cmd tool has its own allowlist, separate from a flow's --allow-cmd. A flow step runs argv a human wrote; the cmd tool runs argv a model wrote, so it allowlists PREFIXES rather than bare command names.",
     "cmd is not behind --allow-writes, deliberately: the prefix list is a stronger and more specific gate, and a flag you must pass even to run `git log` teaches people the flag means nothing.",
-    "The result a model sees starts with the exit code, because that is the part worth branching on -- and every tool in this ecosystem follows the same convention."
+    "The result a model sees starts with the exit code, because that is the part worth branching on -- and every tool in this ecosystem follows the same convention.",
+    "A job's exit code survives because the process ahub spawns is ahub itself, supervising the command. Spawning the command directly would leave nobody to reap it once the turn exits.",
+    "Compaction is reported on the turn that did it (`compaction` in the answer), never silent. A conversation that quietly lost its middle would be impossible to debug.",
+    "A thread is folded at most once per prompt size: if folding did not shrink the prompt, the size is coming from somewhere a summary cannot reach -- a large system prompt, a recalled block -- and folding again would cost another summarisation for nothing.",
+    "When a prompt cannot be made to fit at all, the error is exit 85 prompt_too_large rather than a retryable provider error, because the same prompt will not fit next time either."
   ],
   "recipes": [
     {

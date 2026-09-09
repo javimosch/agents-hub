@@ -135,6 +135,104 @@ func renderCmdResult(o *flow.Output) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// jobTools are how a model starts work that outlives the turn.
+//
+// Three verbs and no more: start, check, read. A model that could also list
+// and stop every job on the machine would be able to interfere with work it
+// did not begin, and nothing it does here should reach outside its own turn.
+func jobTools(h *Hub, prefixes []Prefix) map[string]Tool {
+	allowed := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		allowed = append(allowed, p.Raw)
+	}
+	list := strings.Join(allowed, " | ")
+	return map[string]Tool{
+		"job_start": {
+			Spec: provider.Tool{
+				Name: "job_start",
+				Description: "Start a permitted command in the background and get a job id back " +
+					"immediately. Use this instead of cmd when the work takes more than a few " +
+					"seconds -- a test suite, a build, a deploy. Permitted commands: " + list,
+				Parameters: object(map[string]any{
+					"command": prop("string", "Exactly one of the permitted commands: "+list),
+					"args":    arrayProp("string", "Extra arguments to append."),
+				}, "command"),
+			},
+			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+				extra, err := strList(args, "args")
+				if err != nil {
+					return "", err
+				}
+				j, err := StartJob(h, allowed, Job{
+					Command: str(args, "command"), Thread: ThreadOf(ctx),
+				}, extra)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("Started job %s. It is running in the background; "+
+					"call job_wait with that id when you need the result.", j.ID), nil
+			},
+		},
+		"job_wait": {
+			Spec: provider.Tool{
+				Name: "job_wait",
+				Description: "Wait for a background job, up to a few seconds, and read its result. " +
+					"If it is still running you get told so and can do something else and ask again -- " +
+					"waiting is not the only thing you can do while work happens.",
+				Parameters: object(map[string]any{
+					"job":     prop("string", "The job id returned by job_start."),
+					"seconds": prop("integer", "How long to wait before answering anyway (default 20, max 120)."),
+				}, "job"),
+			},
+			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+				secs := num(args, "seconds", 20)
+				if secs > 120 {
+					// A model that waits five minutes inside one tool call
+					// spends the provider's timeout budget on doing nothing.
+					secs = 120
+				}
+				j, err := h.WaitJob(str(args, "job"), time.Duration(secs)*time.Second)
+				if err != nil {
+					return "", err
+				}
+				if !j.Done() {
+					return fmt.Sprintf("Job %s is still running after %ds. Do something else "+
+						"and call job_wait again.", j.ID, secs), nil
+				}
+				text, err := h.ReadOutput(j, maxCmdOutput)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("Job %s %s with exit code %d.\n%s",
+					j.ID, j.Status, j.ExitCode, strings.TrimSpace(text)), nil
+			},
+		},
+		"job_output": {
+			Spec: provider.Tool{
+				Name:        "job_output",
+				Description: "Read the tail of a background job's output without waiting for it to finish.",
+				Parameters: object(map[string]any{
+					"job": prop("string", "The job id."),
+				}, "job"),
+			},
+			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
+				j, err := h.GetJob(str(args, "job"))
+				if err != nil {
+					return "", err
+				}
+				text, err := h.ReadOutput(j, maxCmdOutput)
+				if err != nil {
+					return "", err
+				}
+				if strings.TrimSpace(text) == "" {
+					return fmt.Sprintf("Job %s is %s and has produced no output yet.", j.ID, j.Status), nil
+				}
+				return fmt.Sprintf("Job %s (%s):\n%s", j.ID, j.Status, strings.TrimSpace(text)), nil
+			},
+		},
+	}
+}
+
 func trimTo(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= n {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/javimosch/agents-hub/internal/bkn"
@@ -113,6 +114,7 @@ func configCmd(fl *flags) {
 				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
 				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
 				"allow_tool_cmds": cfg.AllowToolCmds,
+				"model_limits":    cfg.ModelLimits, "compact_at": cfg.CompactAt,
 				// Names only. A secret printed to stdout is a secret in every
 				// log that captured the command.
 				"secrets": secretNames(cfg),
@@ -134,8 +136,8 @@ func configCmd(fl *flags) {
 	case "set":
 		name := profileName(fl, f)
 		p := f.Profiles[name]
-		changed := applyConfigSet(fl, &p)
-		if len(changed) == 0 {
+		changed, asked := applyConfigSet(fl, &p)
+		if len(changed) == 0 && !asked {
 			out.Fail(out.ValidationError, "validation_error",
 				"give at least one of --bkn, --provider, --provider-url, --model, "+
 					"--provider-key, --timeout, --allow-cmd, --allow-host, --allow-tool-cmd, --secret")
@@ -154,8 +156,11 @@ func configCmd(fl *flags) {
 	}
 }
 
-func applyConfigSet(fl *flags, p *Config) []string {
-	changed := []string{}
+// applyConfigSet returns what changed, and whether anything was asked for at
+// all -- the two are different, because asking for a setting that is already
+// in place changed nothing and is still a success.
+func applyConfigSet(fl *flags, p *Config) (changed []string, asked bool) {
+	changed = []string{}
 	set := func(name string, val string, dst *string) {
 		if val != "" {
 			*dst = val
@@ -172,16 +177,44 @@ func applyConfigSet(fl *flags, p *Config) []string {
 		changed = append(changed, "timeout_secs")
 	}
 	for _, c := range fl.list("allow-cmd") {
+		asked = true
 		if !contains(p.AllowCmds, c) {
 			p.AllowCmds = append(p.AllowCmds, c)
 			changed = append(changed, "allow_cmds")
 		}
 	}
 	for _, hst := range fl.list("allow-host") {
+		asked = true
 		if !contains(p.AllowHosts, hst) {
 			p.AllowHosts = append(p.AllowHosts, hst)
 			changed = append(changed, "allow_hosts")
 		}
+	}
+	for _, ml := range fl.list("model-limit") {
+		asked = true
+		name, val, ok := strings.Cut(ml, "=")
+		if !ok {
+			out.Fail(out.InvalidValue, "invalid_value", "--model-limit takes model=tokens")
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil || n <= 0 {
+			out.Fail(out.InvalidValue, "invalid_value", "--model-limit needs a positive token count")
+		}
+		if p.ModelLimits == nil {
+			p.ModelLimits = map[string]int{}
+		}
+		p.ModelLimits[strings.TrimSpace(name)] = n
+		changed = append(changed, "model_limits")
+	}
+	if v := fl.str("compact-at"); v != "" {
+		asked = true
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f <= 0 || f >= 1 {
+			out.Fail(out.InvalidValue, "invalid_value",
+				"--compact-at takes a fraction between 0 and 1, like 0.6")
+		}
+		p.CompactAt = f
+		changed = append(changed, "compact_at")
 	}
 	for _, s := range fl.list("secret") {
 		k, v, ok := strings.Cut(s, "=")
@@ -195,6 +228,10 @@ func applyConfigSet(fl *flags, p *Config) []string {
 		changed = append(changed, "secrets")
 	}
 	for _, c := range fl.list("allow-tool-cmd") {
+		// Re-adding something already permitted is a no-op that SUCCEEDS.
+		// Setup is meant to be re-runnable, and an agent repeating a step it
+		// already did must never see a false failure.
+		asked = true
 		if !contains(p.AllowToolCmds, c) {
 			p.AllowToolCmds = append(p.AllowToolCmds, c)
 			changed = append(changed, "allow_tool_cmds")
@@ -216,7 +253,7 @@ func applyConfigSet(fl *flags, p *Config) []string {
 		p.ProviderTimeoutSecs = n
 		changed = append(changed, "provider_timeout_secs")
 	}
-	return changed
+	return changed, asked
 }
 
 // secretNames lists which secrets exist without revealing any of them: a

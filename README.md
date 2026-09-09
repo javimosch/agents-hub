@@ -231,7 +231,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-285 assertions against a throwaway bkn, a real HTTP provider that echoes its
+314 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -249,6 +249,53 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 | cli-feedback-spec | not yet |
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
+
+## Jobs: work that outlives a turn
+
+A turn cannot wait — a test suite or a deploy outlives the provider timeout:
+
+```sh
+ahub config set --allow-tool-cmd 'npm test'
+ahub job start --command 'npm test'      # returns immediately with an id
+ahub job wait <id> --timeout 300
+ahub job list | job output <id> | job stop <id>
+```
+
+A model gets three verbs — `job_start`, `job_wait`, `job_output` — and cannot
+list or stop work it did not begin. Jobs go through the **same prefix
+allowlist** as the `cmd` tool, so starting one by hand is bound by what the
+machine permits a model to run.
+
+The exit code survives because the process ahub spawns is **ahub itself**,
+supervising the command and writing the result back to bkn. Spawning the
+command directly would leave nobody to reap it once the turn exits — and a job
+whose result nobody recorded is just a process.
+
+## Compaction: threads that stop fitting
+
+Every response reports `prompt_tokens`, so the size is **measured, not
+estimated**. Cross a fraction of the model's window (60% by default) and the
+older half of the thread is folded into a summary:
+
+```json
+"compaction": {"compacted": true, "reason": "prompt reached 900 tokens, 90% of this model's window",
+               "folded_up_to_seq": 7, "messages_folded": 8, "tokens_spent": 412}
+```
+
+If the provider refuses a prompt anyway, the window **it names is learned and
+written to the profile**, the thread is folded, and the turn is retried once:
+
+```
+learned that deepseek/deepseek-v4-flash has a 128000-token context window
+```
+
+The messages are never deleted — replay skips what the summary covers, but the
+record survives, because a conversation that quietly lost its middle is
+impossible to debug afterwards. Folding happens at most once per prompt size:
+if it didn't shrink, the size is coming from somewhere a summary can't reach.
+And when a prompt can't be made to fit at all, that's exit **85
+`prompt_too_large`** with what would actually help — not a retryable error
+inviting the same failure again.
 
 ## Evals: is it actually better?
 
@@ -356,7 +403,7 @@ bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha2
 Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
 if you'd rather not use bkn for it.
 
-## What v0.10 is not
+## What v0.11 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
 in 2026), no sub-agents, and no OpenAPI import yet — with `curl` allowlisted by

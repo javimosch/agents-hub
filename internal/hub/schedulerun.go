@@ -50,6 +50,7 @@ type RunScheduleOptions struct {
 	Memory    *MemoryOptions
 	Skills    *SkillOptions
 	Trigger   string
+	Compact   *CompactPolicy
 	Now       time.Time
 	Reschedul bool
 }
@@ -102,6 +103,7 @@ func (h *Hub) RunSchedule(ctx context.Context, opts RunScheduleOptions) (*Schedu
 		Memory:   opts.Memory,
 		Skills:   opts.Skills,
 		Tools:    reg,
+		Compact:  opts.Compact,
 		MaxSteps: a.MaxSteps,
 	})
 	if err != nil {

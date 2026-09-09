@@ -10,7 +10,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -90,6 +93,88 @@ type Response struct {
 type Provider interface {
 	Name() string
 	Chat(ctx context.Context, req Request, onDelta func(string)) (*Response, error)
+}
+
+// ContextError is a refusal because the prompt did not fit.
+//
+// It is its own type because it is the one provider failure with a mechanical
+// fix: everything else is retried, reported or abandoned, while this one is
+// answered by making the prompt smaller. Limit and Used are filled in when
+// the provider says them, which most do, and that is how a model's real
+// window gets learned rather than guessed.
+type ContextError struct {
+	Limit   int
+	Used    int
+	Message string
+}
+
+func (e *ContextError) Error() string {
+	if e.Limit > 0 && e.Used > 0 {
+		return fmt.Sprintf("the prompt does not fit: %d tokens against a %d-token window", e.Used, e.Limit)
+	}
+	return "the prompt exceeds this model's context window: " + e.Message
+}
+
+// IsContextError reports whether err is a context-window refusal.
+func IsContextError(err error) (*ContextError, bool) {
+	ce, ok := err.(*ContextError)
+	return ce, ok
+}
+
+// contextMarkers are the phrasings providers use for this refusal. They differ
+// per vendor and none of them is a stable code, so the match is deliberately
+// broad: a missed match costs a retry that fails, while a false match costs a
+// pointless compaction, and both are better than treating it as a hard error.
+var contextMarkers = []string{
+	"context_length_exceeded", "maximum context length", "context length",
+	"context window", "too many tokens", "reduce the length of the messages",
+	"prompt is too long", "input is too long",
+}
+
+// numbersRe pulls the two token counts out of a message like "This model's
+// maximum context length is 8192 tokens. However, your messages resulted in
+// 9001 tokens".
+var numbersRe = regexp.MustCompile(`(\d[\d_,]{2,})`)
+
+// classifyContext turns a provider's refusal into a ContextError when it looks
+// like one, and returns nil when it does not.
+func classifyContext(status int, body string) *ContextError {
+	low := strings.ToLower(body)
+	hit := false
+	for _, m := range contextMarkers {
+		if strings.Contains(low, m) {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		return nil
+	}
+	ce := &ContextError{Message: strings.TrimSpace(body)}
+	nums := numbersRe.FindAllString(body, -1)
+	clean := func(s string) int {
+		s = strings.NewReplacer(",", "", "_", "").Replace(s)
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0
+		}
+		return n
+	}
+	// The first plausible number is the window and the second is what was
+	// sent -- the order every provider observed here uses. When only one is
+	// present it is the window, which is the number worth remembering.
+	if len(nums) > 0 {
+		ce.Limit = clean(nums[0])
+	}
+	if len(nums) > 1 {
+		ce.Used = clean(nums[1])
+	}
+	if ce.Limit > 0 && ce.Used > 0 && ce.Used < ce.Limit {
+		// Reported the other way round by some providers; the larger number
+		// is the one that did not fit.
+		ce.Limit, ce.Used = ce.Used, ce.Limit
+	}
+	return ce
 }
 
 // Config is what it takes to reach a provider.

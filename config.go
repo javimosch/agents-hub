@@ -30,6 +30,17 @@ type Config struct {
 	// and one shared number means either bkn hangs too long or generation is
 	// cut off mid-answer.
 	ProviderTimeoutSecs int `json:"provider_timeout_secs,omitempty"`
+	// JobTimeoutSecs bounds a background job. It is generous because a job
+	// exists precisely for work that does not fit in a turn, but it is not
+	// unbounded: a wedged process nobody reaps is worse than a failed one.
+	JobTimeoutSecs int `json:"job_timeout_secs,omitempty"`
+	// ModelLimits is what each model's context window is believed to be.
+	// Entries are learned from a provider's refusal or set by hand; a model
+	// that is not listed uses a deliberately conservative default.
+	ModelLimits map[string]int `json:"model_limits,omitempty"`
+	// CompactAt is the fraction of the window at which a thread is folded
+	// down. Zero means the default.
+	CompactAt float64 `json:"compact_at,omitempty"`
 
 	// AllowCmds and AllowHosts are what a flow step may reach on this
 	// machine. They live here, in a file the operator owns, and never in a
@@ -155,8 +166,12 @@ func resolve(fl *flags) (Config, string, error) {
 	if c.ProviderTimeoutSecs == 0 {
 		c.ProviderTimeoutSecs = 300
 	}
+	if c.JobTimeoutSecs == 0 {
+		c.JobTimeoutSecs = 3600
+	}
 	envInt("AHUB_TIMEOUT", &c.TimeoutSecs)
 	envInt("AHUB_PROVIDER_TIMEOUT", &c.ProviderTimeoutSecs)
+	envInt("AHUB_JOB_TIMEOUT", &c.JobTimeoutSecs)
 	return c, name, nil
 }
 

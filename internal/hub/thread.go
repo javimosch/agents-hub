@@ -10,13 +10,28 @@ import (
 
 // Thread is one conversation with one agent.
 type Thread struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
-	Agent     string `json:"agent"`
-	Title     string `json:"title,omitempty"`
-	Messages  int    `json:"messages"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ID       string `json:"id"`
+	AgentID  string `json:"agent_id"`
+	Agent    string `json:"agent"`
+	Title    string `json:"title,omitempty"`
+	Messages int    `json:"messages"`
+	// Summary replaces every message up to SummarySeq when the thread is
+	// replayed. The messages themselves are never deleted: what was said is a
+	// record, and a summary that quietly destroyed its source would make a
+	// conversation impossible to audit afterwards.
+	Summary    string `json:"summary,omitempty"`
+	SummarySeq int    `json:"summary_seq,omitempty"`
+	// LastPrompt is the prompt_tokens the provider reported for the most
+	// recent turn -- a measured number rather than an estimate, which is what
+	// makes the compaction threshold trustworthy.
+	LastPrompt int `json:"last_prompt_tokens,omitempty"`
+	// CompactPrompt is what LastPrompt was when this thread was last folded.
+	// If the prompt has not shrunk since, folding again would summarise a
+	// little more and change nothing -- the size is coming from somewhere a
+	// summary cannot reach, like the system prompt or a recalled block.
+	CompactPrompt int    `json:"compacted_at_prompt,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
 }
 
 // Message is one stored turn. Content is kept verbatim; the model and usage
@@ -44,13 +59,17 @@ type Message struct {
 
 func threadFrom(r bkn.Record) Thread {
 	return Thread{
-		ID:        r.Str("id"),
-		AgentID:   r.Str("agent_id"),
-		Agent:     r.Str("agent"),
-		Title:     r.Str("title"),
-		Messages:  int(r.Num("messages")),
-		CreatedAt: r.Str("created_at"),
-		UpdatedAt: r.Str("updated_at"),
+		ID:            r.Str("id"),
+		AgentID:       r.Str("agent_id"),
+		Agent:         r.Str("agent"),
+		Title:         r.Str("title"),
+		Messages:      int(r.Num("messages")),
+		Summary:       r.Str("summary"),
+		SummarySeq:    int(r.Num("summary_seq")),
+		LastPrompt:    int(r.Num("last_prompt_tokens")),
+		CompactPrompt: int(r.Num("compacted_at_prompt")),
+		CreatedAt:     r.Str("created_at"),
+		UpdatedAt:     r.Str("updated_at"),
 	}
 }
 
@@ -119,6 +138,35 @@ func (h *Hub) GetThread(id string) (Thread, error) {
 		return Thread{}, err
 	}
 	return threadFrom(rec), nil
+}
+
+// HistoryAfter returns the messages said after a given seq, which is how a
+// compacted thread replays only the part its summary does not cover.
+func (h *Hub) HistoryAfter(threadID string, afterSeq, limit int) ([]Message, error) {
+	all, err := h.History(threadID, 0)
+	if err != nil {
+		return nil, err
+	}
+	// afterSeq 0 means nothing has been folded. Filtering on seq > 0 there
+	// would silently drop the very first message of every thread, which is
+	// the user's opening question -- the one message a conversation can least
+	// afford to lose.
+	if afterSeq <= 0 {
+		if limit > 0 && len(all) > limit {
+			return all[len(all)-limit:], nil
+		}
+		return all, nil
+	}
+	out := make([]Message, 0, len(all))
+	for _, m := range all {
+		if m.Seq > afterSeq {
+			out = append(out, m)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
 }
 
 // History returns a thread's messages in the order they were said.

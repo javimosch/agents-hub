@@ -99,3 +99,34 @@ func TestWireMessagesShapesToolTurns(t *testing.T) {
 		t.Fatalf("tool turn must not carry tool_calls: %+v", got[1])
 	}
 }
+
+// The one provider failure with a mechanical fix has to be recognised across
+// vendors, none of which agree on the wording or expose a stable code.
+func TestClassifyContextError(t *testing.T) {
+	cases := []struct {
+		body        string
+		wantLimit   int
+		wantUsed    int
+		shouldMatch bool
+	}{
+		{`{"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 9001 tokens.","code":"context_length_exceeded"}}`, 9001, 8192, true},
+		{`{"error":{"message":"Input is too long for requested model."}}`, 0, 0, true},
+		{`{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}`, 210000, 200000, true},
+		{`{"error":{"message":"invalid api key"}}`, 0, 0, false},
+		{`{"error":{"message":"rate limited, try again"}}`, 0, 0, false},
+	}
+	for _, c := range cases {
+		ce := classifyContext(400, c.body)
+		if (ce != nil) != c.shouldMatch {
+			t.Fatalf("match=%v want %v for %s", ce != nil, c.shouldMatch, c.body)
+		}
+		if ce == nil {
+			continue
+		}
+		// The bigger number is what did not fit; the smaller is the window.
+		if c.wantLimit > 0 && (ce.Used != c.wantLimit || ce.Limit != c.wantUsed) {
+			t.Errorf("got used=%d limit=%d, want used=%d limit=%d (%s)",
+				ce.Used, ce.Limit, c.wantLimit, c.wantUsed, c.body)
+		}
+	}
+}

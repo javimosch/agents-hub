@@ -90,6 +90,9 @@ func (o *openAI) Chat(ctx context.Context, req Request, onDelta func(string)) (*
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if ce := classifyContext(resp.StatusCode, string(raw)); ce != nil {
+			return nil, ce
+		}
 		return nil, fmt.Errorf("provider returned %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	if stream {

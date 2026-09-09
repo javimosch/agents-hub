@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -74,7 +76,8 @@ func chatCmd(fl *flags) {
 		HistoryLimit: fl.intVal("history", 100),
 		Memory:       memoryFor(fl, a),
 		Skills:       skillsFor(fl, a),
-		Tools:        toolsFor(fl, cfg, a),
+		Tools:        toolsFor(fl, cfg, h, a),
+		Compact:      compactionFor(fl, cfg),
 		MaxSteps:     fl.intVal("max-steps", 0),
 	}
 	if fl.stream {
@@ -105,6 +108,15 @@ func chatCmd(fl *flags) {
 			out.Fail(out.ExternalError, "cancelled",
 				"interrupted before the model answered; the question is stored",
 				"ahub chat --thread <id> --message <same message>")
+		}
+		var unfit *hub.UnfittableError
+		if errors.As(err, &unfit) {
+			// Not recoverable by retrying: the same prompt will not fit the
+			// next time either. What would help is a shorter system prompt, a
+			// smaller memory budget, or a model with a bigger window.
+			out.Fail(out.InvalidValue, "prompt_too_large", err.Error(),
+				"shorten the agent's system prompt, lower --memory-chars, or use a model with a larger context window",
+				"ahub config set --model-limit <model>=<tokens> if the window is known")
 		}
 		// Anything else at this point came from the model provider.
 		out.Fail(out.ExternalError, "provider_error", err.Error(),
@@ -142,6 +154,9 @@ func chatCmd(fl *flags) {
 	if turn.Skills != nil {
 		fields["skills"] = turn.Skills
 	}
+	if turn.Compaction != nil {
+		fields["compaction"] = turn.Compaction
+	}
 	// Always reported, even when it is 1. A turn that stopped at its step
 	// cap has one step and a finish reason of max_steps, and omitting the
 	// count there would hide the budget exactly where it was hit.
@@ -161,7 +176,7 @@ func chatCmd(fl *flags) {
 // anything that writes -- allowed again with --allow-writes. The second gate
 // exists because "give it tools" and "let it change things" are different
 // decisions that a single flag would collapse into one.
-func toolsFor(fl *flags, cfg Config, a hub.Agent) *hub.Registry {
+func toolsFor(fl *flags, cfg Config, h *hub.Hub, a hub.Agent) *hub.Registry {
 	if fl.has("no-tools") {
 		return nil
 	}
@@ -189,6 +204,7 @@ func toolsFor(fl *flags, cfg Config, a hub.Agent) *hub.Registry {
 		Names: names, Memory: c, Project: project,
 		AllowWrites: fl.has("allow-writes"),
 		ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+		Hub: h,
 	})
 	if err != nil {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
@@ -196,10 +212,60 @@ func toolsFor(fl *flags, cfg Config, a hub.Agent) *hub.Registry {
 	return reg
 }
 
+// compactionFor builds the folding policy from the profile. It is on by
+// default: a thread that silently stops fitting is a worse surprise than one
+// that says it summarised itself, and --no-compact turns it off.
+func compactionFor(fl *flags, cfg Config) *hub.CompactPolicy {
+	if fl.has("no-compact") {
+		return nil
+	}
+	limits := map[string]int{}
+	for k, v := range cfg.ModelLimits {
+		limits[k] = v
+	}
+	at := cfg.CompactAt
+	if v := fl.str("compact-at"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < 1 {
+			at = f
+		}
+	}
+	return &hub.CompactPolicy{
+		Limits: limits, At: at, Keep: fl.intVal("compact-keep", 4),
+		OnLearn: func(model string, limit int) { rememberLimit(fl, model, limit) },
+	}
+}
+
+// rememberLimit writes a window a provider named into the active profile, so
+// it is known before the next call rather than rediscovered by another
+// refusal. A failure to save is reported and ignored: the turn in flight has
+// the number it needs.
+func rememberLimit(fl *flags, model string, limit int) {
+	f, err := loadFile()
+	if err != nil {
+		out.Log("learned %s = %d tokens but could not save it: %v", model, limit, err)
+		return
+	}
+	name := profileName(fl, f)
+	p := f.Profiles[name]
+	if p.ModelLimits == nil {
+		p.ModelLimits = map[string]int{}
+	}
+	if p.ModelLimits[model] == limit {
+		return
+	}
+	p.ModelLimits[model] = limit
+	f.Profiles[name] = p
+	if err := saveFile(f); err != nil {
+		out.Log("learned %s = %d tokens but could not save it: %v", model, limit, err)
+		return
+	}
+	out.Log("learned that %s has a %d-token context window", model, limit)
+}
+
 // needsMemory reports whether any named tool is memgraph-backed.
 func needsMemory(names []string) bool {
 	for _, n := range names {
-		if n != "cmd" {
+		if n != "cmd" && !strings.HasPrefix(n, "job_") {
 			return true
 		}
 	}

@@ -88,6 +88,34 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 	return out, nil
 }
 
+// RunCmdTo runs an allowlisted command, streaming both streams to w and
+// returning the exit code. It exists for background jobs, whose output can be
+// far larger than anything worth holding in memory -- and whose consumer
+// reads a tail from the file rather than a string from a variable.
+func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w io.Writer) (int, error) {
+	if !contains(lim.Commands, command) {
+		return 0, fmt.Errorf("command %q is not allowed here", command)
+	}
+	path, err := exec.LookPath(command)
+	if err != nil {
+		return 0, fmt.Errorf("command %q is allowed but not installed: %w", command, err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, lim.timeout())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Stdout, cmd.Stderr = w, w
+	cmd.Stdin = nil
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("command %q timed out after %s", command, lim.timeout())
+	}
+	if cmd.ProcessState != nil {
+		return cmd.ProcessState.ExitCode(), nil
+	}
+	return 0, err
+}
+
 // RunHTTP performs one request against an allowlisted host.
 func RunHTTP(ctx context.Context, lim Limits, method, rawURL string, headers map[string]string, body string) (*Output, error) {
 	if method == "" {

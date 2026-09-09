@@ -80,7 +80,7 @@ func (r *Registry) Len() int { return len(r.tools) }
 // only wants cmd can run on a machine with no memgraph at all.
 func needsMemgraph(names []string) bool {
 	for _, n := range names {
-		if n != "cmd" {
+		if n != "cmd" && !strings.HasPrefix(n, "job_") {
 			return true
 		}
 	}
@@ -92,6 +92,9 @@ func needsMemgraph(names []string) bool {
 func ToolCatalog() []map[string]any {
 	all := builtins(nil, "")
 	all["cmd"] = cmdTool(nil, 0)
+	for n, t := range jobTools(nil, nil) {
+		all[n] = t
+	}
 	names := make([]string, 0, len(all))
 	for n := range all {
 		names = append(names, n)
@@ -102,8 +105,8 @@ func ToolCatalog() []map[string]any {
 		t := all[n]
 		out = append(out, map[string]any{
 			"name": n, "description": t.Spec.Description,
-			"writes": t.Writes, "needs_memgraph": n != "cmd",
-			"needs_allowlist": n == "cmd",
+			"writes": t.Writes, "needs_memgraph": !strings.HasPrefix(n, "cmd") && !strings.HasPrefix(n, "job"),
+			"needs_allowlist": n == "cmd" || strings.HasPrefix(n, "job"),
 		})
 	}
 	return out
@@ -121,6 +124,27 @@ type RegistryOptions struct {
 	// world only where an operator wrote down exactly how.
 	ToolCmds []string
 	Timeout  time.Duration
+	// Hub and Thread are needed by the job tools, which record what they
+	// start. A registry built without a Hub simply has no job tools.
+	Hub *Hub
+}
+
+// threadKey carries the current thread through the context, because a turn on
+// a NEW thread has no id until the turn is already under way -- and a job
+// recorded without one cannot be traced back to what asked for it.
+type ctxKey int
+
+const threadKey ctxKey = iota
+
+// WithThread marks a context as belonging to a thread.
+func WithThread(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, threadKey, id)
+}
+
+// ThreadOf reads the thread a tool call belongs to, if any.
+func ThreadOf(ctx context.Context) string {
+	id, _ := ctx.Value(threadKey).(string)
+	return id
 }
 
 // NewRegistry selects tools by name.
@@ -145,6 +169,11 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 	}
 	if len(prefixes) > 0 {
 		all["cmd"] = cmdTool(prefixes, opts.Timeout)
+		if opts.Hub != nil {
+			for n, t := range jobTools(opts.Hub, prefixes) {
+				all[n] = t
+			}
+		}
 	}
 	reg := &Registry{tools: map[string]Tool{}}
 	for _, n := range names {

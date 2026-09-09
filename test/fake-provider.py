@@ -10,7 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Set through /control/*, not the environment: the server is started once and
 # the suite has to be able to change its behaviour per assertion.
-MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}', "reply": None}
+MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}', "reply": None,
+        "context_limit": 0, "prompt_tokens": 0}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -29,6 +30,13 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/control/fail":
             MODE["fail"] = bool(req.get("fail"))
             return self._json(200, {"fail": MODE["fail"]})
+        if self.path == "/control/context":
+            # Refuse anything over a pretend window, the way a real provider
+            # does, and let a test set the prompt_tokens it reports back.
+            MODE["context_limit"] = int(req.get("limit") or 0)
+            MODE["prompt_tokens"] = int(req.get("prompt_tokens") or 0)
+            return self._json(200, {"limit": MODE["context_limit"],
+                                    "prompt_tokens": MODE["prompt_tokens"]})
         if self.path == "/control/reply":
             # Lets a test make the model answer a fixed string -- needed to
             # play the judge in an eval, whose verdict must be parseable.
@@ -42,6 +50,17 @@ class H(BaseHTTPRequestHandler):
             return self._json(404, {"error": {"message": "no route"}})
         if MODE["fail"]:
             return self._json(500, {"error": {"message": "model on fire"}})
+
+        msgs_all = req.get("messages", [])
+        if MODE["context_limit"]:
+            # A crude stand-in for a tokeniser: characters over four.
+            size = sum(len(m.get("content") or "") for m in msgs_all) // 4
+            if size > MODE["context_limit"]:
+                return self._json(400, {"error": {
+                    "code": "context_length_exceeded",
+                    "message": "This model's maximum context length is %d tokens. "
+                               "However, your messages resulted in %d tokens."
+                               % (MODE["context_limit"], size)}})
 
         # Tool loop: when tools are offered and no result has come back yet,
         # ask for one. On the next pass the tool turns are in the history, so
@@ -97,7 +116,8 @@ class H(BaseHTTPRequestHandler):
         text = (f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} pad={pad} "
                 f"users={users} tools={len(req.get('tools') or [])} "
                 f"toolout={tool_out} echo={last}")
-        usage = {"prompt_tokens": len(msgs), "completion_tokens": 7, "total_tokens": len(msgs) + 7}
+        prompt = MODE["prompt_tokens"] or len(msgs)
+        usage = {"prompt_tokens": prompt, "completion_tokens": 7, "total_tokens": prompt + 7}
 
         if req.get("stream"):
             self.send_response(200)

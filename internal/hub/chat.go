@@ -22,6 +22,10 @@ type Turn struct {
 	Skills   *SkillReport   `json:"skills,omitempty"`
 	Steps    int            `json:"steps,omitempty"`
 	ToolRuns []ToolRun      `json:"tool_runs,omitempty"`
+	// Compaction is present whenever a turn folded the thread down, so a
+	// caller can see that history was summarised rather than discovering it
+	// later from a conversation that has quietly lost its middle.
+	Compaction *CompactReport `json:"compaction,omitempty"`
 }
 
 // ToolRun is one executed tool call, reported so an agent can see what the
@@ -72,6 +76,15 @@ type ChatOptions struct {
 	// budget.
 	Tools    *Registry
 	MaxSteps int
+
+	// NoStore runs a turn without creating a thread or recording anything.
+	// It exists for work that is about a conversation rather than part of one
+	// -- summarising it, judging it -- which should not appear in it.
+	NoStore bool
+	// Compact folds the thread down before the turn when its measured prompt
+	// size has crossed the threshold, and again if the provider refuses the
+	// prompt anyway.
+	Compact *CompactPolicy
 }
 
 // SkillOptions is the set of skills to load for this turn.
@@ -108,6 +121,10 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, fmt.Errorf("message is required")
 	}
 
+	if opts.NoStore {
+		return h.oneShot(ctx, p, opts)
+	}
+
 	th := opts.Thread
 	if th == nil {
 		created, err := h.CreateThread(opts.Agent, titleFrom(opts.Message))
@@ -117,7 +134,23 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		th = &created
 	}
 
-	history, err := h.History(th.ID, opts.HistoryLimit)
+	// Compaction happens before the history is read, so the turn is built
+	// from the folded thread rather than the one that no longer fits.
+	var compaction *CompactReport
+	if opts.Compact != nil && opts.Compact.Due(th, opts.Agent.Model) {
+		rep, err := h.Compact(ctx, p, th, opts.Agent, *opts.Compact,
+			fmt.Sprintf("prompt reached %d tokens, %d%% of this model's window",
+				th.LastPrompt, int(100*float64(th.LastPrompt)/float64(opts.Compact.LimitFor(opts.Agent.Model)))))
+		if err != nil {
+			// A failed compaction is reported and the turn goes ahead: the
+			// prompt may still fit, and refusing to answer because the
+			// housekeeping failed would be the wrong trade.
+			rep.Error = err.Error()
+		}
+		compaction = rep
+	}
+
+	history, err := h.HistoryAfter(th.ID, th.SummarySeq, opts.HistoryLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +158,14 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 	msgs := make([]provider.Message, 0, len(history)+3)
 	if opts.Agent.System != "" {
 		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
+	}
+	// The summary sits with the other system context: it is what the model
+	// knows about this conversation, not something the user said.
+	if th.Summary != "" {
+		msgs = append(msgs, provider.Message{
+			Role:    provider.RoleSystem,
+			Content: "## Earlier in this conversation\n\n" + th.Summary,
+		})
 	}
 	block, err := recallFor(opts)
 	if err != nil {
@@ -163,8 +204,12 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, err
 	}
 
-	turn := &Turn{Thread: *th, User: userMsg, Memory: block, Skills: skills}
+	// From here on the context knows which thread it belongs to, so a tool
+	// that records something can say what asked for it.
+	ctx = WithThread(ctx, th.ID)
+	turn := &Turn{Thread: *th, User: userMsg, Memory: block, Skills: skills, Compaction: compaction}
 	next := seq + 1
+	compacted := false
 	maxSteps := opts.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 8
@@ -182,8 +227,51 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 			MaxTokens:   opts.Agent.MaxTokens,
 			Tools:       specs,
 		}, opts.OnDelta)
+		if ce, isCtx := provider.IsContextError(err); isCtx && opts.Compact != nil && !compacted {
+			// The backstop. The threshold is an estimate of somebody else's
+			// tokeniser; this is the provider telling us the real answer, so
+			// the window it names is remembered and the thread is folded and
+			// tried once more. Once, and reported: a silent retry loop around
+			// a full context window is a way to spend money on nothing.
+			compacted = true
+			if ce.Limit > 0 {
+				if opts.Compact.Limits != nil {
+					opts.Compact.Limits[opts.Agent.Model] = ce.Limit
+				}
+				if opts.Compact.OnLearn != nil {
+					opts.Compact.OnLearn(opts.Agent.Model, ce.Limit)
+				}
+			}
+			th.LastPrompt = ce.Used
+			rep, cerr := h.Compact(ctx, p, th, opts.Agent, *opts.Compact, "the provider refused the prompt: "+ce.Error())
+			if cerr == nil && rep.Compacted {
+				compaction = rep
+				rebuilt, herr := h.rebuild(opts, th, block, skillText, specs)
+				if herr != nil {
+					return nil, herr
+				}
+				msgs = rebuilt
+				continue
+			}
+			// Compaction could not rescue it. That usually means the fixed
+			// parts -- the system prompt, a recalled block, a skill -- are
+			// already close to the window, and no amount of folding the
+			// conversation will help. Saying that is far more use than
+			// "provider error, try again".
+			return nil, &UnfittableError{Ctx: ce, Why: compactWhy(rep, cerr)}
+		}
+		if ce, isCtx := provider.IsContextError(err); isCtx && compacted {
+			// Folded once already and it still does not fit. Retrying is not
+			// the answer and neither is folding again, so say what would
+			// actually help rather than inviting another attempt.
+			return nil, &UnfittableError{Ctx: ce,
+				Why: "the thread was compacted and the prompt still does not fit"}
+		}
 		if err != nil {
 			return nil, err
+		}
+		if resp.Usage.PromptTokens > 0 {
+			th.LastPrompt = resp.Usage.PromptTokens
 		}
 		turn.Steps = step
 		model := resp.Model
@@ -263,6 +351,54 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 			return nil, err
 		}
 	}
+}
+
+// UnfittableError is a prompt that does not fit and cannot be made to fit by
+// folding the conversation.
+type UnfittableError struct {
+	Ctx *provider.ContextError
+	Why string
+}
+
+func (e *UnfittableError) Error() string {
+	return e.Ctx.Error() + "; compaction could not help: " + e.Why
+}
+
+func compactWhy(rep *CompactReport, err error) string {
+	switch {
+	case err != nil:
+		return err.Error()
+	case rep != nil && rep.Error != "":
+		return rep.Error
+	default:
+		return "there was nothing left to fold"
+	}
+}
+
+// oneShot answers without a thread, for work about a conversation rather than
+// in it. Nothing is stored, so nothing later has to explain why a summary is
+// sitting in the middle of a transcript.
+func (h *Hub) oneShot(ctx context.Context, p provider.Provider, opts ChatOptions) (*Turn, error) {
+	msgs := []provider.Message{}
+	if opts.Agent.System != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
+	}
+	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: opts.Message})
+	resp, err := p.Chat(ctx, provider.Request{
+		Model: opts.Agent.Model, Messages: msgs,
+		Temperature: opts.Agent.Temperature, MaxTokens: opts.Agent.MaxTokens,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	model := resp.Model
+	if model == "" {
+		model = opts.Agent.Model
+	}
+	return &Turn{
+		Reply: Message{Role: provider.RoleAssistant, Content: resp.Content, Model: model},
+		Model: model, Usage: resp.Usage, Finish: resp.FinishReason, Steps: 1,
+	}, nil
 }
 
 // runTool executes one call. A tool failure is returned to the model as the
@@ -426,10 +562,41 @@ func recallFor(opts ChatOptions) (*memory.Block, error) {
 // touch records how many messages the thread now holds and when it last moved.
 func (h *Hub) touch(th *Thread, count int) error {
 	th.Messages = count
-	_, err := h.C.Patch(RefThreads, th.ID, map[string]any{
-		"messages": count, "updated_at": now(),
-	})
+	fields := map[string]any{"messages": count, "updated_at": now()}
+	// The measured prompt size rides along with the message count, so the
+	// next turn knows how close to the window this thread already is without
+	// having to estimate anything.
+	if th.LastPrompt > 0 {
+		fields["last_prompt_tokens"] = th.LastPrompt
+	}
+	_, err := h.C.Patch(RefThreads, th.ID, fields)
 	return err
+}
+
+// rebuild reassembles the prompt after a compaction mid-turn.
+func (h *Hub) rebuild(opts ChatOptions, th *Thread, block *memory.Block, skillText string, specs []provider.Tool) ([]provider.Message, error) {
+	history, err := h.HistoryAfter(th.ID, th.SummarySeq, opts.HistoryLimit)
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]provider.Message, 0, len(history)+4)
+	if opts.Agent.System != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
+	}
+	if th.Summary != "" {
+		msgs = append(msgs, provider.Message{
+			Role: provider.RoleSystem, Content: "## Earlier in this conversation\n\n" + th.Summary})
+	}
+	if block != nil && block.Text != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: block.Text})
+	}
+	if skillText != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: skillText})
+	}
+	for _, m := range history {
+		msgs = append(msgs, toProvider(m))
+	}
+	return msgs, nil
 }
 
 // nextSeq continues the thread's numbering. It reads the last stored seq

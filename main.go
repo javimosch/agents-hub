@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 
 	"github.com/javimosch/agents-hub/internal/bkn"
@@ -62,6 +63,8 @@ func main() {
 		flowCmd(fl)
 	case "eval":
 		evalCmd(fl)
+	case "job":
+		jobCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -120,6 +123,12 @@ func persistTokens(fl *flags, t bkn.Tokens) {
 func hubFor(fl *flags) (*hub.Hub, Config) {
 	c, cfg := client(fl)
 	return hub.New(c), cfg
+}
+
+// jsonBytes renders a payload for an error suggestion.
+func jsonBytes(v any) (string, error) {
+	b, err := json.Marshal(v)
+	return string(b), err
 }
 
 // isBackend reports whether an error came from bkn rather than from this
