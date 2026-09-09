@@ -17,56 +17,6 @@ import (
 // the loop, so an uncapped `find /` is a bill as much as a mistake.
 const maxCmdOutput = 4000
 
-// Prefix is one command shape an operator has permitted a model to run.
-//
-// It is a prefix and not a bare command name because the argv author differs
-// from a flow's: there, a human wrote `git -C /repo status --porcelain`; here
-// a model writes the arguments, and allowlisting `git` would permit
-// `git push --force`. The model may append to a prefix, never alter it.
-type Prefix struct {
-	Raw    string
-	Fields []string
-}
-
-// ParsePrefixes turns the configured strings into prefixes, refusing any that
-// is empty or that starts with a flag.
-func ParsePrefixes(raw []string) ([]Prefix, error) {
-	out := make([]Prefix, 0, len(raw))
-	for _, r := range raw {
-		fields := strings.Fields(r)
-		if len(fields) == 0 {
-			continue
-		}
-		if strings.HasPrefix(fields[0], "-") {
-			return nil, fmt.Errorf("%q does not start with a command", r)
-		}
-		out = append(out, Prefix{Raw: strings.Join(fields, " "), Fields: fields})
-	}
-	return out, nil
-}
-
-// match finds the prefix a requested command belongs to. The comparison is on
-// whole fields, so "git logger" cannot pass as "git log".
-func match(prefixes []Prefix, want string) (Prefix, bool) {
-	fields := strings.Fields(want)
-	for _, p := range prefixes {
-		if len(fields) != len(p.Fields) {
-			continue
-		}
-		same := true
-		for i := range fields {
-			if fields[i] != p.Fields[i] {
-				same = false
-				break
-			}
-		}
-		if same {
-			return p, true
-		}
-	}
-	return Prefix{}, false
-}
-
 // cmdTool exposes the allowed prefixes to a model.
 //
 // There is no second --allow-writes gate here, and that is deliberate rather
@@ -75,7 +25,7 @@ func match(prefixes []Prefix, want string) (Prefix, bool) {
 // until an operator writes down exactly which command shapes are permitted --
 // and a flag that must be passed even to run `git log` would only teach
 // people that the flag means nothing.
-func cmdTool(prefixes []Prefix, timeout time.Duration) Tool {
+func cmdTool(prefixes []flow.Prefix, timeout time.Duration) Tool {
 	allowed := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
 		allowed = append(allowed, p.Raw)
@@ -97,7 +47,7 @@ func cmdTool(prefixes []Prefix, timeout time.Duration) Tool {
 		},
 		Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 			want := str(args, "command")
-			p, ok := match(prefixes, want)
+			p, ok := flow.Match(prefixes, strings.Fields(want))
 			if !ok {
 				return "", fmt.Errorf("%q is not permitted here. Permitted commands: %s", want, list)
 			}
@@ -140,7 +90,7 @@ func renderCmdResult(o *flow.Output) string {
 // Three verbs and no more: start, check, read. A model that could also list
 // and stop every job on the machine would be able to interfere with work it
 // did not begin, and nothing it does here should reach outside its own turn.
-func jobTools(h *Hub, prefixes []Prefix) map[string]Tool {
+func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
 	allowed := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
 		allowed = append(allowed, p.Raw)

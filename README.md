@@ -202,6 +202,38 @@ exactly like one that does not exist — deliberately, so 404s cannot enumerate
 what an operator installed — which is why the refusal here names both
 possibilities rather than guessing.
 
+### Steps that need root
+
+Don't run ahub as root — that hands every step of every flow the privilege one
+step needed. Allowlist the privileged **shape** instead:
+
+```sh
+ahub config set --allow-cmd 'sudo journalctl'    # journalctl as root, nothing else
+```
+
+Allowlist entries are whole-field prefixes, so this permits
+`sudo journalctl --vacuum-size=250M` and refuses `sudo rm -rf /`. A one-word
+entry still allows any arguments — which is exactly why `sudo` alone should
+never be one.
+
+The **real** gate is the sudoers rule, enforced and audited by the OS rather
+than by this process:
+
+```
+# /etc/sudoers.d/ahub-journal   (visudo -f, mode 0440)
+you ALL=(root) NOPASSWD: /usr/bin/journalctl --vacuum-size=*
+```
+
+Two gates, and they narrow differently: ahub says which shapes a flow may
+attempt, sudoers says what root will actually run. A compromised ahub cannot
+widen the second one.
+
+For anything genuinely dangerous, go one further: put the work in a root-owned
+systemd unit and let the flow only start it
+(`--allow-cmd 'sudo systemctl start ahub-vacuum'`). Then even a fully
+compromised ahub can trigger one predefined action rather than compose a new
+one — the definition lives in a file it cannot edit.
+
 ### How deterministic is it?
 
 The control flow is: no step but `ask` calls a model, the operators are a

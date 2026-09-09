@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javimosch/agents-hub/internal/flow"
 	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/provider"
 )
@@ -163,7 +164,7 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 		return nil, fmt.Errorf("tools need memgraph: %w", memory.ErrUnavailable)
 	}
 	all := builtins(mc, defaultProject)
-	prefixes, err := ParsePrefixes(opts.ToolCmds)
+	prefixes, err := flow.ParsePrefixes(opts.ToolCmds)
 	if err != nil {
 		return nil, err
 	}

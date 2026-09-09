@@ -18,6 +18,93 @@ import (
 // capture is a bill and a storage problem at the same time.
 const maxOut = 256 << 10
 
+// Prefix is one command shape an operator has permitted.
+//
+// A prefix rather than a bare command name, because "which program" is rarely
+// the interesting question. Allowing "sudo" would allow sudo ANYTHING; what an
+// operator means is "journalctl, as root" -- three fields, not one. A
+// single-word prefix behaves exactly as a bare name always did.
+type Prefix struct {
+	Raw    string
+	Fields []string
+}
+
+// ParsePrefixes turns configured strings into prefixes, refusing any that is
+// empty or starts with a flag.
+func ParsePrefixes(raw []string) ([]Prefix, error) {
+	out := make([]Prefix, 0, len(raw))
+	for _, r := range raw {
+		fields := strings.Fields(r)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.HasPrefix(fields[0], "-") {
+			return nil, fmt.Errorf("%q does not start with a command", r)
+		}
+		out = append(out, Prefix{Raw: strings.Join(fields, " "), Fields: fields})
+	}
+	return out, nil
+}
+
+// Match reports whether an argv begins with one of the permitted prefixes.
+// Comparison is on whole fields, so "git logger" is not "git log".
+func Match(prefixes []Prefix, argv []string) (Prefix, bool) {
+	for _, p := range prefixes {
+		if len(argv) < len(p.Fields) {
+			continue
+		}
+		same := true
+		for i := range p.Fields {
+			if argv[i] != p.Fields[i] {
+				same = false
+				break
+			}
+		}
+		if same {
+			return p, true
+		}
+	}
+	return Prefix{}, false
+}
+
+// Names renders prefixes for an error message.
+func Names(prefixes []Prefix) string {
+	out := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		out = append(out, p.Raw)
+	}
+	return strings.Join(out, " | ")
+}
+
+// allowed checks a full argv against the limit's prefixes.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (l Limits) allowed(argv []string) error {
+	prefixes, err := ParsePrefixes(l.Commands)
+	if err != nil {
+		return err
+	}
+	if _, ok := Match(prefixes, argv); ok {
+		return nil
+	}
+	// The suggestion names the COMMAND, not the whole argv: the arguments here
+	// were rendered from templates and may contain a value that belongs to
+	// this run rather than to the policy. A longer prefix is how an operator
+	// narrows it -- "sudo journalctl" rather than "sudo".
+	if len(prefixes) == 0 {
+		return fmt.Errorf("no commands are permitted here; add one with "+
+			"`ahub config set --allow-cmd %s` (or a longer prefix to narrow it)", argv[0])
+	}
+	return fmt.Errorf("%q is not permitted here. Permitted: %s. Add it with "+
+		"`ahub config set --allow-cmd %s` (or a longer prefix, like %q)",
+		strings.Join(argv, " "), Names(prefixes), argv[0], strings.Join(argv[:min(2, len(argv))], " "))
+}
+
 // Limits are the local policy a flow runs under.
 //
 // Both allowlists live in the operator's profile, never in the flow
@@ -54,9 +141,8 @@ type Output struct {
 // so an exit code is a typed answer the flow can branch on: 105 means retry,
 // 82 means the arguments were wrong, 92 means it is not there.
 func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdin string) (*Output, error) {
-	if !contains(lim.Commands, command) {
-		return nil, fmt.Errorf("command %q is not allowed here; add it with "+
-			"`ahub config set --allow-cmd %s`", command, command)
+	if err := lim.allowed(append([]string{command}, args...)); err != nil {
+		return nil, err
 	}
 	path, err := exec.LookPath(command)
 	if err != nil {
@@ -93,8 +179,8 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 // far larger than anything worth holding in memory -- and whose consumer
 // reads a tail from the file rather than a string from a variable.
 func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w io.Writer) (int, error) {
-	if !contains(lim.Commands, command) {
-		return 0, fmt.Errorf("command %q is not allowed here", command)
+	if err := lim.allowed(append([]string{command}, args...)); err != nil {
+		return 0, err
 	}
 	path, err := exec.LookPath(command)
 	if err != nil {

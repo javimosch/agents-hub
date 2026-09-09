@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javimosch/agents-hub/internal/bkn"
+	"github.com/javimosch/agents-hub/internal/flow"
 )
 
 // RefJobs is where background work is recorded.
@@ -201,8 +202,8 @@ func (h *Hub) Spawn(j Job) (Job, error) {
 
 // ResolveJobCommand checks a recorded job against the current allowlist and
 // returns the binary and the arguments to run.
-func ResolveJobCommand(prefixes []Prefix, j Job) (argv []string, bin string, err error) {
-	p, ok := match(prefixes, j.Command)
+func ResolveJobCommand(prefixes []flow.Prefix, j Job) (argv []string, bin string, err error) {
+	p, ok := flow.Match(prefixes, strings.Fields(j.Command))
 	if !ok {
 		return nil, "", fmt.Errorf("%q is not permitted on this machine", j.Command)
 	}
@@ -212,21 +213,17 @@ func ResolveJobCommand(prefixes []Prefix, j Job) (argv []string, bin string, err
 // StartJob validates, records and spawns in one step, so no caller can do two
 // of the three and leave a half-started job behind.
 func StartJob(h *Hub, allowed []string, j Job, extra []string) (Job, error) {
-	prefixes, err := ParsePrefixes(allowed)
+	prefixes, err := flow.ParsePrefixes(allowed)
 	if err != nil {
 		return Job{}, err
 	}
-	if _, ok := match(prefixes, j.Command); !ok {
-		list := make([]string, 0, len(prefixes))
-		for _, p := range prefixes {
-			list = append(list, p.Raw)
-		}
-		if len(list) == 0 {
+	if _, ok := flow.Match(prefixes, strings.Fields(j.Command)); !ok {
+		if len(prefixes) == 0 {
 			return Job{}, fmt.Errorf("no commands are permitted on this machine; " +
 				"add one with `ahub config set --allow-tool-cmd '<prefix>'`")
 		}
 		return Job{}, fmt.Errorf("%q is not permitted here. Permitted commands: %s",
-			j.Command, strings.Join(list, " | "))
+			j.Command, flow.Names(prefixes))
 	}
 	j.Args = extra
 	created, err := h.CreateJob(j)

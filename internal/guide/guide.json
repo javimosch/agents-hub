@@ -196,6 +196,10 @@
     {
       "name": "how deterministic a flow is",
       "what": "The control flow is: no step but ask calls a model, the operators are a closed set, first match wins, and an unset {{variable}} fails the step rather than substituting empty. A run reports llm_calls and tokens, so 'this costs nothing' is checkable rather than claimed. What is NOT deterministic is what the commands say -- that is the point of asking them."
+    },
+    {
+      "name": "privileged steps",
+      "what": "Do not run ahub as root. Allowlist the privileged SHAPE instead: `--allow-cmd 'sudo journalctl'` permits journalctl as root and nothing else, because the allowlist matches whole-field prefixes. The real gate is the sudoers rule, which the OS enforces and audits; ahub's allowlist is the second one. For anything genuinely dangerous, put the work in a root-owned systemd unit and let the flow only start it -- then a compromised ahub can trigger one predefined action, not compose a new one."
     }
   ],
   "gotchas": [
@@ -241,7 +245,8 @@
     "A thread is folded at most once per prompt size: if folding did not shrink the prompt, the size is coming from somewhere a summary cannot reach -- a large system prompt, a recalled block -- and folding again would cost another summarisation for nothing.",
     "When a prompt cannot be made to fit at all, the error is exit 85 prompt_too_large rather than a retryable provider error, because the same prompt will not fit next time either.",
     "A flow has no arithmetic. It can COMPARE numbers (gt/lt read the leading number, so `du -sb` output compares straight against a budget) but it cannot compute one. If you need a calculation, do it in the command.",
-    "A conditional reads its variable by name, so an unset one compares as empty rather than failing the way a template does. Declare optional variables in the flow's `inputs` list; anything else that no step sets is reported by validate."
+    "A conditional reads its variable by name, so an unset one compares as empty rather than failing the way a template does. Declare optional variables in the flow's `inputs` list; anything else that no step sets is reported by validate.",
+    "An allowlist entry is a whole-field prefix: 'sudo journalctl' permits `sudo journalctl --vacuum-size=250M` and refuses `sudo rm`. A one-word entry behaves as it always did, allowing any arguments -- which is why 'sudo' alone should never be one."
   ],
   "recipes": [
     {

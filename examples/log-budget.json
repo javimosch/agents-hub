@@ -1,6 +1,6 @@
 {
   "name": "log-budget",
-  "description": "Keep the systemd journal under a budget. Reports by default; --input mode=enforce vacuums and then VERIFIES the effect, because journalctl exits 0 even when it could not delete anything. No ask step, so llm_calls is always 0.",
+  "description": "Keep the systemd journal under a budget. Reports by default; --input mode=enforce vacuums as root and then VERIFIES the effect, because journalctl exits 0 even when it could not delete anything. Needs `--allow-cmd 'sudo journalctl'` plus a sudoers rule; no ask step, so llm_calls is always 0.",
   "inputs": [
     "mode"
   ],
@@ -75,8 +75,9 @@
     },
     "vacuum": {
       "type": "cmd",
-      "command": "journalctl",
+      "command": "sudo",
       "args": [
+        "journalctl",
         "--vacuum-size={{keep}}"
       ],
       "var": "vacuumed",

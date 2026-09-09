@@ -306,7 +306,7 @@ func validateStep(name string, s Step, add func(string, string, bool), allowedCm
 		}
 		if s.Command == "" {
 			add(name, "cmd needs a command", true)
-		} else if !contains(allowedCmds, s.Command) {
+		} else if !firstFieldAllowed(allowedCmds, s.Command) {
 			// A warning, not a fatal: the allowlist is machine-local state,
 			// and refusing to store a definition because THIS machine cannot
 			// run it would make flows unshareable. The engine refuses the
@@ -358,6 +358,20 @@ func validateStep(name string, s Step, add func(string, string, bool), allowedCm
 }
 
 // Ops lists the comparison operators.
+// firstFieldAllowed reports whether any permitted prefix starts with this
+// command word. The arguments are only known at run time -- they may be
+// templates -- so validation checks the part that is knowable and the engine
+// checks the whole thing.
+func firstFieldAllowed(allowed []string, command string) bool {
+	for _, a := range allowed {
+		fields := strings.Fields(a)
+		if len(fields) > 0 && fields[0] == command {
+			return true
+		}
+	}
+	return false
+}
+
 func Ops() []string {
 	return []string{OpEq, OpNe, OpContains, OpEmpty, OpNotEmpty, OpGt, OpLt}
 }

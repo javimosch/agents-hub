@@ -154,7 +154,7 @@ func TestDerivedVariablesAreKnown(t *testing.T) {
 // A command that is not on the allowlist never runs, whatever the flow says.
 func TestCmdRefusesUnlistedCommand(t *testing.T) {
 	_, err := RunCmd(context.Background(), Limits{Commands: []string{"echo"}}, "rm", []string{"-rf", "/"}, "")
-	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+	if err == nil || !strings.Contains(err.Error(), "not permitted") {
 		t.Fatalf("unlisted command was not refused: %v", err)
 	}
 }
@@ -227,5 +227,27 @@ func TestValidateWarnsOnUnsetBranchVariable(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("a typo in a conditional variable went unreported")
+	}
+}
+
+// An operator means "journalctl, as root", not "sudo anything". A prefix says
+// that; a bare command name cannot.
+func TestPrefixAllowlistScopesPrivilegedCommands(t *testing.T) {
+	lim := Limits{Commands: []string{"sudo journalctl", "echo"}}
+	if err := lim.allowed([]string{"sudo", "journalctl", "--vacuum-size=250M"}); err != nil {
+		t.Fatalf("the permitted shape was refused: %v", err)
+	}
+	for _, argv := range [][]string{
+		{"sudo", "rm", "-rf", "/"},
+		{"sudo", "journalctld"},
+		{"sudo"},
+	} {
+		if err := lim.allowed(argv); err == nil {
+			t.Fatalf("%v should not be permitted by `sudo journalctl`", argv)
+		}
+	}
+	// A single-word prefix keeps behaving exactly as a bare name always did.
+	if err := lim.allowed([]string{"echo", "anything", "at", "all"}); err != nil {
+		t.Fatalf("a one-word prefix should allow any arguments: %v", err)
 	}
 }

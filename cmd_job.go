@@ -122,7 +122,7 @@ func jobExec(fl *flags) {
 	}
 	// Re-checked here, against this machine's current allowlist, because the
 	// record has been out of this process's hands since it was written.
-	prefixes, err := hub.ParsePrefixes(cfg.AllowToolCmds)
+	prefixes, err := flow.ParsePrefixes(cfg.AllowToolCmds)
 	if err != nil {
 		finishJob(h, j, 0, err)
 		return
