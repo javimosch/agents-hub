@@ -178,6 +178,44 @@ func (h *Hub) ListRuns(flowName, status string, limit int) ([]map[string]any, er
 	return out, nil
 }
 
+// Scripter wires a flow's script step to bkn, carrying the caller's own
+// token. The gate is bkn's per-script run policy, so a flow can only reach
+// scripts the operator has deliberately opened -- which is why this step
+// needs no allowlist here: adding one would be a second, weaker copy of a
+// decision already recorded next to the code.
+func (h *Hub) Scripter() flow.Scripter {
+	return func(ctx context.Context, name string, input any) (string, bool, error) {
+		res, err := h.C.RunScript(name, input)
+		if err != nil {
+			// bkn answers a closed script exactly as it answers a missing
+			// one, on purpose: otherwise a 404 would tell a caller which
+			// scripts an operator has installed. So the client cannot say
+			// which of the two happened, and must not pretend to -- it names
+			// both, and the fix for either.
+			if bkn.Unauthorized(err) {
+				return "", false, fmt.Errorf(
+					"bkn refused the script %q: it is admin-only, or it does not exist. "+
+						"An operator can open it with `bkn script update %s --run-access user`",
+					name, name)
+			}
+			return "", false, err
+		}
+		if res.Value == nil {
+			return "", res.OK, nil
+		}
+		b, err := json.Marshal(res.Value)
+		if err != nil {
+			return "", res.OK, err
+		}
+		// A string value is unquoted, so {{var}} reads as the text the script
+		// returned rather than as a JSON literal with quotes around it.
+		if s, ok := res.Value.(string); ok {
+			return s, res.OK, nil
+		}
+		return string(b), res.OK, nil
+	}
+}
+
 // Asker wires a flow's ask step to a real assistant and thread, so an LLM
 // turn inside a flow is stored, auditable and resumable exactly like a chat.
 // A flow that talks to a model leaves the same trail as a person who did.

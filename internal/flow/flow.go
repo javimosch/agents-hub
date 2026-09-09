@@ -27,6 +27,7 @@ const (
 	TypeCond    = "conditional"
 	TypeCmd     = "cmd"
 	TypeHTTP    = "http"
+	TypeScript  = "script"
 	TypeAsk     = "ask"
 	TypeEnd     = "end"
 )
@@ -93,6 +94,15 @@ type Step struct {
 
 	// ask
 	Assistant string `json:"assistant,omitempty"`
+
+	// script names a bkn script to run. It carries the caller's own token, so
+	// the script runs as the user and bkn's per-script run policy decides
+	// whether it may run at all -- which is why this step exists at all and
+	// why it needs no allowlist of its own: the gate lives in bkn, next to
+	// the code being run.
+	Script string `json:"script,omitempty"`
+	// Input is a JSON object template sent as the script's input.
+	Input string `json:"input,omitempty"`
 
 	// end
 	Status string `json:"status,omitempty"` // completed (default) | failed
@@ -225,7 +235,7 @@ func Validate(f *Flow, allowedCmds, allowedHosts []string) []Problem {
 		// A cmd or http step sets three variables, not one: the output, the
 		// exit code and the error text. A flow that branches on the code is
 		// doing the intended thing and must not be warned about it.
-		if s.Type == TypeCmd || s.Type == TypeHTTP {
+		if s.Type == TypeCmd || s.Type == TypeHTTP || s.Type == TypeScript {
 			set[s.Var+"_code"] = true
 			set[s.Var+"_err"] = true
 		}
@@ -303,6 +313,13 @@ func validateStep(name string, s Step, add func(string, string, bool), allowedCm
 				add(name, "host "+host+" is not allowed on this machine "+
 					"(ahub config set --allow-host "+host+")", false)
 			}
+		}
+	case TypeScript:
+		if s.Script == "" {
+			add(name, "script needs a script name", true)
+		}
+		if s.Select != "" && s.Parse != "json" {
+			add(name, "select needs parse: json", true)
 		}
 	case TypeAsk:
 		if s.Assistant == "" {

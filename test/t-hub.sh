@@ -422,6 +422,65 @@ chk "and counts its tokens"           "True"    "$(printf '%s' "$AK" | python3 -
 chkin "and the answer is a variable"  "said turns=" "$(printf '%s' "$AK" | j messages.0)"
 chk "the LLM turn is stored as a thread" "True" "$(printf '%s' "$AK" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(bool(d["data"].get("answer")))')"
 
+# --- flows calling bkn scripts ---------------------------------------------
+# The step that needed a bkn change first: a script runs with the USER's
+# token, and bkn's per-script run policy decides whether it may run at all.
+# No admin token appears anywhere on this path.
+cat > "$WORK/tally.js" <<'JS'
+function main(input) {
+  return { who: bkn.caller.kind, sub: bkn.caller.sub, note: input.note || "none" };
+}
+JS
+cat > "$WORK/boom.js" <<'JS'
+function main(input) { throw new Error("script decided to fail"); }
+JS
+"$BKN" script create tally --file "$WORK/tally.js" --run-access user >/dev/null 2>&1
+"$BKN" script create shut  --file "$WORK/tally.js" >/dev/null 2>&1
+"$BKN" script create boom  --file "$WORK/boom.js" --run-access user >/dev/null 2>&1
+
+cat > "$WORK/scriptflow.json" <<'FLOW'
+{"name":"tallyflow","start":"a","steps":{
+  "a":{"type":"script","script":"tally","input":"{\"note\":\"from a flow\"}","var":"t","parse":"json","select":"who","next":"b","on_error":"refused"},
+  "b":{"type":"message","text":"script saw {{t}}","next":"done"},
+  "refused":{"type":"message","text":"refused: {{t_err}}","next":"bad"},
+  "done":{"type":"end"},
+  "bad":{"type":"end","status":"failed"}}}
+FLOW
+a flow create --file "$WORK/scriptflow.json" >/dev/null
+SF="$(a flow run tallyflow)"
+chk "a flow can run a bkn script"     "completed" "$(printf '%s' "$SF" | j status)"
+chk "the script ran as the user"      "user"    "$(printf '%s' "$SF" | j data.t)"
+chk "and no tokens were spent"        "0"       "$(printf '%s' "$SF" | j tokens)"
+# Selecting a different field proves the input arrived, rather than hoping to
+# find it somewhere in the run.
+python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1])); d['name']='noteflow'; d['steps']['a']['select']='note'
+json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/noteflow.json"
+a flow create --file "$WORK/noteflow.json" >/dev/null
+chk "the input reached the script"    "from a flow" "$(a flow run noteflow | j data.t)"
+
+# A script the operator has not opened is refused, and the flow handles it.
+python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1])); d['name']='shutflow'; d['steps']['a']['script']='shut'
+json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/shutflow.json"
+a flow create --file "$WORK/shutflow.json" >/dev/null
+chk "an unopened script fails the run" "105"    "$(code flow run shutflow)"
+chkin "and names both possibilities"  "admin-only, or it does not exist" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+chkin "and how an operator opens it"  "--run-access user" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+
+# A script that ran and threw is a result, not a transport failure: the flow
+# gets to branch on it.
+python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1])); d['name']='boomflow'; d['steps']['a']['script']='boom'
+d['steps']['a'].pop('parse'); d['steps']['a'].pop('select')
+json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/boomflow.json"
+a flow create --file "$WORK/boomflow.json" >/dev/null
+chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
+chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+
 # --- token refresh ---------------------------------------------------------
 # A bkn access token is a 15-minute JWT. An agent must not have to notice.
 python3 -c '

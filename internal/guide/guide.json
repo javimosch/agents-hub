@@ -119,6 +119,10 @@
     {
       "name": "secrets",
       "what": "Referenced as {{secret.NAME}} and resolved from the local profile, so a definition can be stored and shared without its credentials. Values are redacted before anything is written to a run."
+    },
+    {
+      "name": "script steps",
+      "what": "A script step runs a bkn script with YOUR token. bkn decides whether it may run, per script, next to the code being run -- so this tool needs no allowlist for it. An operator opens one with `bkn script update <name> --run-access user`. The script sees bkn.caller, so it can scope what it returns to whoever asked."
     }
   ],
   "gotchas": [
@@ -141,7 +145,9 @@
     "An unset {{variable}} fails the step instead of substituting an empty string: a command with a silently empty argument is a different command.",
     "Command arguments are argv, never a shell line. A collected value containing `;` or backticks stays one argument.",
     "An allowlist problem is a warning at validate time and a refusal at run time -- a definition has to stay storable on a machine that cannot run it.",
-    "A conditional with no else ends the run when nothing matches, rather than guessing a branch."
+    "A conditional with no else ends the run when nothing matches, rather than guessing a branch.",
+    "bkn answers a script you may not run exactly as it answers one that does not exist, so that 404s cannot enumerate what an operator installed. A refusal therefore names both possibilities; it is not being vague, it genuinely cannot tell you which.",
+    "A bkn script that runs and throws is a RESULT, not a transport failure: the step sets <var>_code=1 and takes on_error, so a flow can handle it."
   ],
   "recipes": [
     {

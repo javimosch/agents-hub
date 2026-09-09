@@ -192,6 +192,10 @@ func flowRun(fl *flags, resumeID string) {
 			Timeout:  time.Duration(fl.intVal("step-timeout", 60)) * time.Second,
 		},
 	}
+	// bkn is already reachable -- the flow itself came from there -- so the
+	// script bridge costs nothing to attach.
+	engine.Script = h.Scripter()
+
 	// The model is wired in only when the flow can actually reach one, so a
 	// purely deterministic flow never touches the provider layer at all.
 	if usesAsk(f) {

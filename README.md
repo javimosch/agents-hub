@@ -147,6 +147,7 @@ ahub flow run release-notes --input repo=~/ai/agents-hub
 | `collect_input` | free | **pauses the run**, exits 92 naming what it needs |
 | `cmd` | free | an allowlisted CLI, by argv, with its exit code as a variable |
 | `http` | free | an allowlisted host, with its status as a variable |
+| `script` | free | a bkn script, run with **your** token |
 | `ask` | tokens | the only step that calls a model |
 
 Integrations are CLIs, deliberately. Every tool in this ecosystem follows
@@ -163,6 +164,20 @@ data — possibly data a model wrote — so a flow able to name its own
 executables would be arbitrary code execution with extra steps. Secrets work
 the same way: a flow says `{{secret.GH_TOKEN}}`, the value lives in the 0600
 profile, and it is redacted out of anything written to a run.
+
+A `script` step is the one integration that needs no allowlist here, because
+the gate lives in bkn instead — next to the code being run. Every bkn script
+is admin-only until an operator opens it:
+
+```sh
+bkn script update tally --run-access user     # on the bkn machine, once
+```
+
+The script then runs with the caller's own token and sees `bkn.caller`, so it
+can scope what it returns to whoever asked. A script you may not run answers
+exactly like one that does not exist — deliberately, so 404s cannot enumerate
+what an operator installed — which is why the refusal here names both
+possibilities rather than guessing.
 
 `ahub flow validate` is the cheap win. Because the path is data, unknown
 targets, unreachable steps, variables nothing sets and commands this machine
@@ -193,7 +208,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-168 assertions against a throwaway bkn, a real HTTP provider that echoes its
+177 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -212,19 +227,14 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
 
-## What v0.4 is not
+## What v0.5 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
 in 2026), no sub-agents, no HITL, no scheduling, and no `loop` or `subflow`
 step yet. bkn already has `cron` and `hooks`, so triggering a flow on a
 schedule or a webhook is wiring, not engine work.
 
-A `script` step — running a bkn script from a flow — is blocked on bkn: its
-script routes sit behind the admin token, and putting one of those on the
-serving path would break the rule this repo has held since v0.1. It needs a
-policy for user-runnable scripts first.
-
-Otherwise, what remains of
+What remains of
 `the internal project`'s agentic engine and they are not here yet — this is the
 spine they attach to.
 

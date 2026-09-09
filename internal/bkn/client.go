@@ -320,6 +320,41 @@ func (c *Client) Patch(ref, id string, doc map[string]any) (Record, error) {
 	return out.Record, err
 }
 
+// ScriptResult is what a script run returned.
+type ScriptResult struct {
+	OK    bool           `json:"ok"`
+	Value any            `json:"value"`
+	Run   map[string]any `json:"run"`
+}
+
+// RunScript executes a bkn script with this client's token.
+//
+// Nothing here supplies an admin credential: whether the call is allowed is
+// decided by the script's own declared run policy, next to the code being
+// run. A 403 means the operator has not opened that script, and no amount of
+// retrying from here will change it.
+func (c *Client) RunScript(name string, input any) (*ScriptResult, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	var out ScriptResult
+	err := c.do(http.MethodPost, "/v1/script/"+url.PathEscape(name)+"/run", input, &out)
+	// A script that ran and failed answers 422 with a body worth reading: the
+	// value, the logs and the run id. That is a result, not a transport
+	// error, so it is unwrapped rather than raised.
+	var ae *APIError
+	if e, ok := err.(*APIError); ok && e.Status == http.StatusUnprocessableEntity {
+		ae = e
+	}
+	if ae != nil {
+		return &ScriptResult{OK: false, Run: map[string]any{"error": ae.Message}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Delete removes a document.
 func (c *Client) Delete(ref, id string) error {
 	return c.do(http.MethodDelete, "/v1/store/"+ref+"/"+url.PathEscape(id), nil, nil)

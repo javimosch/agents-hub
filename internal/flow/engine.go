@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -60,12 +61,19 @@ type Run struct {
 // knows it wants an answer, not how one is produced.
 type Asker func(ctx context.Context, assistant, prompt, thread string) (text, threadID string, tokens int, err error)
 
+// Scripter runs a bkn script as the caller. Like Asker it is a function, so
+// this package needs to know nothing about bkn, tokens or HTTP. It returns
+// the script's value as JSON text plus the run status, so a flow can branch
+// on a script that reported failure without the step itself erroring.
+type Scripter func(ctx context.Context, name string, input any) (value string, ok bool, err error)
+
 // Engine advances a run.
 type Engine struct {
 	Flow     *Flow
 	Limits   Limits
 	Secrets  map[string]string
 	Ask      Asker
+	Script   Scripter
 	MaxSteps int
 }
 
@@ -214,6 +222,9 @@ func (e *Engine) do(ctx context.Context, run *Run, name string, s Step) {
 	case TypeCmd, TypeHTTP:
 		e.doIO(ctx, run, name, s, r)
 
+	case TypeScript:
+		e.doScript(ctx, run, name, s, r)
+
 	case TypeAsk:
 		e.doAsk(ctx, run, name, s, r)
 
@@ -321,6 +332,67 @@ func (e *Engine) after(run *Run, name string, s Step, msg string, code int) {
 		return
 	}
 	e.fail(run, name+": "+msg)
+}
+
+// doScript runs a bkn script through the caller's own token.
+func (e *Engine) doScript(ctx context.Context, run *Run, name string, s Step, r Renderer) {
+	if e.Script == nil {
+		e.fail(run, name+": this run has no way to reach bkn")
+		return
+	}
+	var input any = map[string]any{}
+	if s.Input != "" {
+		rendered, err := r.Render(s.Input)
+		if err != nil {
+			e.fail(run, name+": "+err.Error())
+			return
+		}
+		if err := json.Unmarshal([]byte(rendered), &input); err != nil {
+			e.fail(run, name+": input is not a JSON object: "+err.Error())
+			return
+		}
+	}
+	value, ok, err := e.Script(ctx, s.Script, input)
+	if err != nil {
+		msg := r.Redact(err.Error())
+		e.trace(run, name, s.Type, msg, 0)
+		e.after(run, name, s, msg, -1)
+		return
+	}
+	out := &Output{Text: value}
+	if !ok {
+		// A script that ran and reported failure is data, like a non-zero
+		// exit code: the flow may have an on_error branch for exactly this.
+		out.Code = 1
+		out.Err = "the script reported failure"
+	}
+	if perr := ParseOutput(out, s.Parse); perr != nil {
+		e.trace(run, name, s.Type, perr.Error(), out.Code)
+		e.after(run, name, s, perr.Error(), out.Code)
+		return
+	}
+	result := value
+	if s.Select != "" {
+		v, found := Field(out.Parsed, s.Select)
+		if !found {
+			msg := "no field " + s.Select + " in the script's value"
+			e.trace(run, name, s.Type, msg, out.Code)
+			e.after(run, name, s, msg, out.Code)
+			return
+		}
+		result = v
+	}
+	if s.Var != "" {
+		run.Data[s.Var] = result
+		run.Data[s.Var+"_code"] = strconv.Itoa(out.Code)
+		run.Data[s.Var+"_err"] = out.Err
+	}
+	e.trace(run, name, s.Type, s.Script, out.Code)
+	if !ok {
+		e.after(run, name, s, out.Err, out.Code)
+		return
+	}
+	e.goTo(run, s.Next)
 }
 
 func (e *Engine) doAsk(ctx context.Context, run *Run, name string, s Step, r Renderer) {
