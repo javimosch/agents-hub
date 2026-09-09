@@ -109,12 +109,33 @@ ahub chat --agent agent --tools memory_recall,skill_show \
 # {"content":"...arena { }...","steps":2,"tool_runs":[{"name":"memory_recall","chars":4979}]}
 ```
 
-| Tool | Writes |
-|---|---|
-| `memory_recall` — search past notes | no |
-| `skill_search` — find procedures by topic | no |
-| `skill_show` — read one procedure in full | no |
-| `memory_save` — record a durable note | **yes** |
+| Tool | Writes | Needs |
+|---|---|---|
+| `memory_recall` — search past notes | no | memgraph |
+| `skill_search` — find procedures by topic | no | memgraph |
+| `skill_show` — read one procedure in full | no | memgraph |
+| `memory_save` — record a durable note | **yes** | memgraph |
+| `cmd` — run a permitted command | — | an allowlist |
+
+### Reaching the world: the `cmd` tool
+
+Flows could always run commands; agents could only look things up. `cmd` closes
+that, but the argv author changes from a human to a model, so the gate changes
+too — **prefixes**, not bare command names:
+
+```sh
+ahub config set --allow-tool-cmd 'gh pr list' --allow-tool-cmd 'git log'
+ahub chat --agent helper --tools cmd --message "what PRs are open?"
+```
+
+The model picks a permitted prefix and may append arguments; it can never
+change the prefix. Allowing `git log` does not allow `git push --force`, and
+`git logger` is not a match either — comparison is on whole fields. The list is
+empty by default, so the tool does not exist until someone permits something.
+
+It is deliberately **not** behind `--allow-writes`: the prefix list is a
+stronger and more specific gate, and a flag you must pass even to run `git log`
+would only teach people the flag means nothing.
 
 Every tool is memgraph-backed, which is deliberate: the first tools an
 agent gets are the ones that let it *look things up*, not the ones that
@@ -210,7 +231,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-267 assertions against a throwaway bkn, a real HTTP provider that echoes its
+285 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -335,10 +356,18 @@ bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha2
 Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
 if you'd rather not use bkn for it.
 
-## What v0.9 is not
+## What v0.10 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
-in 2026), no sub-agents, no HITL, and no `loop` or `subflow` step yet. Nor is
+in 2026), no sub-agents, and no OpenAPI import yet — with `curl` allowlisted by
+prefix, much of what an OpenAPI tool would buy is already reachable.
+
+There is no `loop` or `subflow` flow step, and there will not be one until
+something needs it: the caller here is usually an agent, and an agent already
+has a loop, branching and composition. `ahub flow run a && ahub flow run b`
+is subflow. HITL is `collect_input`, which pauses and exits 92 with the resume
+command — when the caller is an agent, "human in the loop" is "caller in the
+loop". Nor is
 there prompt-improvement: the internal project's eval-analysis can propose and apply
 a better prompt from failed runs, and that only becomes worth building now that
 a proposal can be scored against the run it came from. bkn already has `cron` and `hooks`, so triggering a flow on a

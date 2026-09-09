@@ -164,7 +164,7 @@ func evalRun(fl *flags) {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error())
 	}
 	opts.Provider = p
-	attachAgentContext(fl, agent, &opts)
+	attachAgentContext(fl, cfg, agent, &opts)
 
 	// Progress on stderr: an eval can run for minutes and spend real money,
 	// and a caller that learns nothing until the end cannot stop it early.
@@ -210,7 +210,7 @@ func evalRun(fl *flags) {
 // attachAgentContext gives an eval run the same memory, skills and tools the
 // agent would have in a chat. Measuring it without them would measure a
 // different agent than the one that answers real questions.
-func attachAgentContext(fl *flags, a hub.Agent, opts *hub.EvalOptions) {
+func attachAgentContext(fl *flags, cfg Config, a hub.Agent, opts *hub.EvalOptions) {
 	if len(a.Tools) == 0 && len(a.Skills) == 0 && a.MemoryProject == "" {
 		return
 	}
@@ -226,7 +226,11 @@ func attachAgentContext(fl *flags, a hub.Agent, opts *hub.EvalOptions) {
 		opts.Skills = &hub.SkillOptions{Client: mc}
 	}
 	if len(a.Tools) > 0 {
-		reg, err := hub.NewRegistry(a.Tools, mc, a.MemoryProject, fl.has("allow-writes"))
+		reg, err := hub.NewRegistry(hub.RegistryOptions{
+			Names: a.Tools, Memory: mc, Project: a.MemoryProject,
+			AllowWrites: fl.has("allow-writes"),
+			ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+		})
 		if err != nil {
 			out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
 		}

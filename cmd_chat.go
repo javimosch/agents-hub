@@ -74,7 +74,7 @@ func chatCmd(fl *flags) {
 		HistoryLimit: fl.intVal("history", 100),
 		Memory:       memoryFor(fl, a),
 		Skills:       skillsFor(fl, a),
-		Tools:        toolsFor(fl, a),
+		Tools:        toolsFor(fl, cfg, a),
 		MaxSteps:     fl.intVal("max-steps", 0),
 	}
 	if fl.stream {
@@ -161,7 +161,7 @@ func chatCmd(fl *flags) {
 // anything that writes -- allowed again with --allow-writes. The second gate
 // exists because "give it tools" and "let it change things" are different
 // decisions that a single flag would collapse into one.
-func toolsFor(fl *flags, a hub.Agent) *hub.Registry {
+func toolsFor(fl *flags, cfg Config, a hub.Agent) *hub.Registry {
 	if fl.has("no-tools") {
 		return nil
 	}
@@ -172,20 +172,38 @@ func toolsFor(fl *flags, a hub.Agent) *hub.Registry {
 	if len(names) == 0 {
 		return nil
 	}
-	c, err := memory.New(0)
-	if err != nil {
+	// memgraph is needed only by the tools that use it: an agent given only
+	// the cmd tool must run on a machine that has never heard of memgraph.
+	var c *memory.Client
+	if mc, err := memory.New(0); err == nil {
+		c = mc
+	} else if needsMemory(names) {
 		out.Fail(out.NotFound, "memgraph_missing", err.Error(),
-			"every tool in this build is backed by memgraph; install it or pass --no-tools")
+			"these tools are memgraph-backed; install it, drop them, or pass --no-tools")
 	}
 	project := fl.str("memory-project")
 	if project == "" {
 		project = a.MemoryProject
 	}
-	reg, err := hub.NewRegistry(names, c, project, fl.has("allow-writes"))
+	reg, err := hub.NewRegistry(hub.RegistryOptions{
+		Names: names, Memory: c, Project: project,
+		AllowWrites: fl.has("allow-writes"),
+		ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+	})
 	if err != nil {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
 	}
 	return reg
+}
+
+// needsMemory reports whether any named tool is memgraph-backed.
+func needsMemory(names []string) bool {
+	for _, n := range names {
+		if n != "cmd" {
+			return true
+		}
+	}
+	return false
 }
 
 // memoryFor decides whether this turn recalls anything.

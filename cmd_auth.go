@@ -112,6 +112,7 @@ func configCmd(fl *flags) {
 				"timeout_secs": cfg.TimeoutSecs, "provider_timeout_secs": cfg.ProviderTimeoutSecs,
 				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
 				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
+				"allow_tool_cmds": cfg.AllowToolCmds,
 				// Names only. A secret printed to stdout is a secret in every
 				// log that captured the command.
 				"secrets": secretNames(cfg),
@@ -136,7 +137,8 @@ func configCmd(fl *flags) {
 		changed := applyConfigSet(fl, &p)
 		if len(changed) == 0 {
 			out.Fail(out.ValidationError, "validation_error",
-				"give at least one of --bkn, --provider, --provider-url, --model, --provider-key, --timeout")
+				"give at least one of --bkn, --provider, --provider-url, --model, "+
+					"--provider-key, --timeout, --allow-cmd, --allow-host, --allow-tool-cmd, --secret")
 		}
 		f.Profiles[name] = p
 		if f.ActiveProfile == "" {
@@ -191,6 +193,16 @@ func applyConfigSet(fl *flags, p *Config) []string {
 		}
 		p.Secrets[k] = v
 		changed = append(changed, "secrets")
+	}
+	for _, c := range fl.list("allow-tool-cmd") {
+		if !contains(p.AllowToolCmds, c) {
+			p.AllowToolCmds = append(p.AllowToolCmds, c)
+			changed = append(changed, "allow_tool_cmds")
+		}
+	}
+	for _, c := range fl.list("deny-tool-cmd") {
+		p.AllowToolCmds = without(p.AllowToolCmds, c)
+		changed = append(changed, "allow_tool_cmds")
 	}
 	for _, c := range fl.list("deny-cmd") {
 		p.AllowCmds = without(p.AllowCmds, c)

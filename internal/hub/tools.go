@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/provider"
@@ -75,10 +76,22 @@ func (r *Registry) get(name string) (Tool, bool) {
 // Len reports how many tools are enabled.
 func (r *Registry) Len() int { return len(r.tools) }
 
+// needsMemgraph reports whether any named tool requires it, so an agent that
+// only wants cmd can run on a machine with no memgraph at all.
+func needsMemgraph(names []string) bool {
+	for _, n := range names {
+		if n != "cmd" {
+			return true
+		}
+	}
+	return false
+}
+
 // ToolCatalog describes every tool this build knows about, whether or not it
 // is enabled. It exists so an agent can discover the set without guessing.
 func ToolCatalog() []map[string]any {
 	all := builtins(nil, "")
+	all["cmd"] = cmdTool(nil, 0)
 	names := make([]string, 0, len(all))
 	for n := range all {
 		names = append(names, n)
@@ -89,29 +102,58 @@ func ToolCatalog() []map[string]any {
 		t := all[n]
 		out = append(out, map[string]any{
 			"name": n, "description": t.Spec.Description,
-			"writes": t.Writes, "needs_memgraph": true,
+			"writes": t.Writes, "needs_memgraph": n != "cmd",
+			"needs_allowlist": n == "cmd",
 		})
 	}
 	return out
 }
 
+// RegistryOptions is what a turn may be given.
+type RegistryOptions struct {
+	Names   []string
+	Memory  *memory.Client
+	Project string
+	// AllowWrites permits a tool that mutates a shared store.
+	AllowWrites bool
+	// ToolCmds are the command prefixes the cmd tool may run. Empty means the
+	// cmd tool does not exist, which is the default: an agent reaches the
+	// world only where an operator wrote down exactly how.
+	ToolCmds []string
+	Timeout  time.Duration
+}
+
 // NewRegistry selects tools by name.
 //
-// Every tool here is backed by memgraph, which is deliberate: the first tools
-// an agent gets are the ones that let it look things up rather than the
-// ones that let it act. A shell tool is not an oversight.
-func NewRegistry(names []string, mc *memory.Client, defaultProject string, allowWrites bool) (*Registry, error) {
+// Most tools here are backed by memgraph -- looking things up rather than
+// acting -- and the one exception, cmd, can only run command shapes an
+// operator enumerated in advance. There is still no shell tool, and that is
+// not an oversight.
+func NewRegistry(opts RegistryOptions) (*Registry, error) {
+	names := opts.Names
 	if len(names) == 0 {
 		return nil, nil
 	}
-	if mc == nil {
+	mc, defaultProject, allowWrites := opts.Memory, opts.Project, opts.AllowWrites
+	if mc == nil && needsMemgraph(names) {
 		return nil, fmt.Errorf("tools need memgraph: %w", memory.ErrUnavailable)
 	}
 	all := builtins(mc, defaultProject)
+	prefixes, err := ParsePrefixes(opts.ToolCmds)
+	if err != nil {
+		return nil, err
+	}
+	if len(prefixes) > 0 {
+		all["cmd"] = cmdTool(prefixes, opts.Timeout)
+	}
 	reg := &Registry{tools: map[string]Tool{}}
 	for _, n := range names {
 		t, ok := all[n]
 		if !ok {
+			if n == "cmd" {
+				return nil, fmt.Errorf("the cmd tool has no permitted commands on this machine; " +
+					"add one with `ahub config set --allow-tool-cmd 'gh pr list'`")
+			}
 			return nil, fmt.Errorf("unknown tool %q (known: %s)", n, strings.Join(catalogNames(all), ", "))
 		}
 		if t.Writes && !allowWrites {

@@ -231,7 +231,7 @@ chkin "and it says why"               "not markdown" "$(errj error.message)"
 # --- tools -----------------------------------------------------------------
 # The fake model asks for one tool, then answers with the result in its
 # history: the same two-pass shape a real model produces.
-chk "the catalog needs nothing"       "4"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
+chk "the catalog needs nothing"       "5"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
 chk "the catalog marks what writes"   "memory_save" "$("$AHUB" tool list | python3 -c 'import json,sys;print(",".join(t["name"] for t in json.load(sys.stdin)["tools"] if t["writes"]))')"
 chk "an unknown tool is refused"      "85"      "$(code chat --agent helper --tools no_such_tool --message x)"
 chkin "and it lists the real ones"    "memory_recall" "$(errj error.message)"
@@ -480,6 +480,59 @@ json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/boomflow.jso
 a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+
+# --- the cmd tool -----------------------------------------------------------
+# Flows could always reach the world; agents could only look things up. This
+# closes that, but the argv author changes from a human to a model, so the
+# gate changes too: prefixes, not bare command names.
+chk "the catalog lists cmd"           "True"    "$("$AHUB" tool list | python3 -c 'import json,sys;print(any(t["name"]=="cmd" for t in json.load(sys.stdin)["tools"]))')"
+chk "and marks it as needing an allowlist" "True" "$("$AHUB" tool list | python3 -c 'import json,sys;print(next(t["needs_allowlist"] for t in json.load(sys.stdin)["tools"] if t["name"]=="cmd"))')"
+chk "and as not needing memgraph"     "False"   "$("$AHUB" tool list | python3 -c 'import json,sys;print(next(t["needs_memgraph"] for t in json.load(sys.stdin)["tools"] if t["name"]=="cmd"))')"
+
+# With no prefixes the tool does not exist at all -- the default is that an
+# agent cannot run anything.
+chk "cmd needs a permitted command"   "85"      "$(code chat --agent helper --tools cmd --message x)"
+chkin "and says how to permit one"    "--allow-tool-cmd" "$(errj error.message)"
+
+a config set --allow-tool-cmd "echo hello" --allow-tool-cmd "git log" >/dev/null
+chk "config lists the prefixes"       "echo hello" "$(a config show | j config.allow_tool_cmds.0)"
+
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"world\"]}"}'
+CM="$(a chat --agent helper --tools cmd --message run)"
+chkin "a permitted command runs"      "hello world" "$(printf '%s' "$CM" | j content)"
+chkin "and the model sees the exit code" "exit code: 0" "$(printf '%s' "$CM" | j content)"
+chk "the run is recorded"             "cmd"     "$(printf '%s' "$CM" | j tool_runs.0.name)"
+
+# The gate: a model may append to a prefix, never change it.
+tool_mode '{"tool":"cmd","args":"{\"command\":\"rm -rf\",\"args\":[\"/\"]}"}'
+chkin "an unpermitted command is refused" "is not permitted here" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+chk "and nothing ran"                 "False"   "$([ -e /tmp/cmdtool-pwned ] && echo True || echo False)"
+tool_mode '{"tool":"cmd","args":"{\"command\":\"git push\",\"args\":[\"--force\"]}"}'
+chkin "a sibling subcommand is refused" "\"git push\" is not permitted" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+tool_mode '{"tool":"cmd","args":"{\"command\":\"git logger\",\"args\":[]}"}'
+chkin "a longer word is not a prefix match" "is not permitted" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+
+# Arguments are argv, exactly as in a flow step.
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"; touch /tmp/cmdtool-pwned\"]}"}'
+CS="$(a chat --agent helper --tools cmd --message x)"
+chkin "arguments are argv, not a shell line" "; touch /tmp/cmdtool-pwned" "$(printf '%s' "$CS" | j content)"
+chk "so nothing was executed"         "False"   "$([ -e /tmp/cmdtool-pwned ] && echo True || echo False)"
+
+# A model that sends one string instead of an array is making an ordinary
+# mistake, and one argument is a fine reading of it.
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":\"there\"}"}'
+chkin "a bare string arg is accepted"  "hello there" "$(a chat --agent helper --tools cmd --message x | j content)"
+
+# Revocation takes effect on the next call.
+a config set --deny-tool-cmd "echo hello" >/dev/null
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"world\"]}"}'
+chkin "revoking a prefix takes effect" "is not permitted here" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+a config set --allow-tool-cmd "echo hello" >/dev/null
+
+# An agent given only cmd must run on a machine with no memgraph at all.
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"nomem\"]}"}'
+chkin "cmd works without memgraph"    "hello nomem" "$(AHUB_MEMGRAPH=/nonexistent a chat --agent helper --tools cmd --message x | j content)"
+tool_mode '{"args":"{\"query\":\"ports\"}"}'
 
 # --- evals -----------------------------------------------------------------
 # The measurement half. Without it every other change here is an opinion.

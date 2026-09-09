@@ -38,6 +38,12 @@ type Config struct {
 	// execution with extra steps.
 	AllowCmds  []string `json:"allow_cmds,omitempty"`
 	AllowHosts []string `json:"allow_hosts,omitempty"`
+	// AllowToolCmds is a SEPARATE list, and separate on purpose. A flow step
+	// runs argv a human wrote; the cmd tool runs argv a model wrote. So this
+	// list holds command PREFIXES ("gh pr list") rather than bare names: the
+	// model may append arguments, never change the prefix. Allowlisting bare
+	// "git" for a model would permit `git push --force`.
+	AllowToolCmds []string `json:"allow_tool_cmds,omitempty"`
 	// Secrets are referenced from a flow as {{secret.NAME}} and never stored
 	// in one, so a definition can be shared without its credentials.
 	Secrets map[string]string `json:"secrets,omitempty"`

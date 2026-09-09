@@ -174,6 +174,10 @@
     {
       "name": "assertions",
       "what": "contains, not_contains, equals, matches, max_tokens, max_steps, tool_used, tool_not_used and judge. All free except judge, which asks a second agent for a PASS/FAIL and a reason. Name a separate judge agent: a model grading its own homework is a weaker signal than a second one."
+    },
+    {
+      "name": "the cmd tool",
+      "what": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and may append arguments; it can never change the prefix, so allowing 'git log' does not allow 'git push'. Empty by default, which means the tool does not exist until someone permits something."
     }
   ],
   "gotchas": [
@@ -210,7 +214,10 @@
     "Each case gets a fresh thread, so a case cannot be influenced by the one above it in the file.",
     "A case whose model call failed counts as FAILED, never skipped: an outage must never read as an improvement.",
     "`ahub eval run` exits 0 whatever it scored -- the code says the eval ran, the data says how it went. --strict exits 1, deliberately outside cli-output-spec's 80-119 bands, because the tool worked and the agent did not. 105 would tell an agent to retry a failing eval and expect a different answer.",
-    "A judge assertion with no judge configured FAILS rather than passing: a check that silently becomes a no-op is worse than no check."
+    "A judge assertion with no judge configured FAILS rather than passing: a check that silently becomes a no-op is worse than no check.",
+    "The cmd tool has its own allowlist, separate from a flow's --allow-cmd. A flow step runs argv a human wrote; the cmd tool runs argv a model wrote, so it allowlists PREFIXES rather than bare command names.",
+    "cmd is not behind --allow-writes, deliberately: the prefix list is a stronger and more specific gate, and a flag you must pass even to run `git log` teaches people the flag means nothing.",
+    "The result a model sees starts with the exit code, because that is the part worth branching on -- and every tool in this ecosystem follows the same convention."
   ],
   "recipes": [
     {
@@ -252,6 +259,10 @@
     {
       "command": "ahub agent run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'",
       "why": "What one autonomous run did, and what it cost."
+    },
+    {
+      "command": "ahub config set --allow-tool-cmd 'gh pr list' && ahub chat --agent helper --tools cmd --message 'what PRs are open?'",
+      "why": "An agent reaching a real system, through a command shape you chose."
     }
   ],
   "see_also": {

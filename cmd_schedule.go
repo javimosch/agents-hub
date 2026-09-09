@@ -209,7 +209,11 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 				opts.Skills = &hub.SkillOptions{Client: mc}
 			}
 			if len(a.Tools) > 0 {
-				reg, err := hub.NewRegistry(a.Tools, mc, a.MemoryProject, fl.has("allow-writes"))
+				reg, err := hub.NewRegistry(hub.RegistryOptions{
+					Names: a.Tools, Memory: mc, Project: a.MemoryProject,
+					AllowWrites: fl.has("allow-writes"),
+					ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+				})
 				if err != nil {
 					out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
 				}
