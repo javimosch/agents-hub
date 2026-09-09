@@ -78,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares every collection" "7"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "9"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -480,6 +480,113 @@ json.dump(d, open(sys.argv[2],'w'))" "$WORK/scriptflow.json" "$WORK/boomflow.jso
 a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
+
+# --- evals -----------------------------------------------------------------
+# The measurement half. Without it every other change here is an opinion.
+reply_mode() { curl -sf -X POST "$P/control/reply" -d "$1" >/dev/null; }
+
+cat > "$WORK/quality.json" <<'EVAL'
+{
+  "name": "quality",
+  "agent": "helper",
+  "cases": [
+    {"name": "echoes", "message": "why does it leak",
+     "expect": [{"op": "contains", "value": "echo=why does it leak"},
+                {"op": "max_tokens", "value": "500"},
+                {"op": "tool_not_used", "value": "memory_recall"}]},
+    {"name": "fails-on-purpose", "message": "hello",
+     "expect": [{"op": "contains", "value": "a string the echo will never contain",
+                 "why": "proves a failing assertion is reported, not swallowed"}]},
+    {"name": "parked", "message": "x", "skip": "waiting on something",
+     "expect": [{"op": "contains", "value": "never checked"}]}
+  ]
+}
+EVAL
+chk "validate accepts a good eval"    "True"    "$(a eval validate --file "$WORK/quality.json" | j valid)"
+chk "and counts the costly assertions" "0"      "$(a eval validate --file "$WORK/quality.json" | j costly_assertions)"
+
+cat > "$WORK/badeval.json" <<'EVAL'
+{"name":"bad","agent":"helper","cases":[
+  {"name":"a","message":"m","expect":[{"op":"matches","value":"[unclosed"}]},
+  {"name":"a","message":"m","expect":[{"op":"max_tokens","value":"lots"}]},
+  {"name":"b","message":"m","expect":[{"op":"nonsense","value":"x"}]},
+  {"name":"c","message":"m","expect":[{"op":"judge","value":"is it good?"}]}]}
+EVAL
+chk "a broken eval is refused"        "82"      "$(code eval validate --file "$WORK/badeval.json")"
+chkin "the bad regex is named"        "error parsing regexp" "$(errj error.message)"
+chkin "the unparseable bound is named" "needs a number" "$(errj error.message)"
+chkin "the unknown op is named"       "unknown op" "$(errj error.message)"
+chkin "a judge with no judge warns"   "names no judge" "$(errj error.message)"
+chk "a broken eval cannot be stored"  "82"      "$(code eval create --file "$WORK/badeval.json")"
+
+chk "create stores it"                "quality" "$(a eval create --file "$WORK/quality.json" | j eval.name)"
+chk "it is listed"                    "quality" "$(a eval list | j evals.0.name)"
+
+EV="$(a eval run quality)"
+chk "a run scores every case"         "1"       "$(printf '%s' "$EV" | j passed)"
+chk "and counts the failure"          "1"       "$(printf '%s' "$EV" | j failed)"
+chk "and honours a skip"              "1"       "$(printf '%s' "$EV" | j skipped)"
+chk "the pass rate ignores skips"     "0.50"    "$(printf '%s' "$EV" | j pass_rate)"
+chk "tokens are totalled"             "True"    "$(printf '%s' "$EV" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tokens"] > 0)')"
+chk "a failing check explains itself" "not found in the answer" "$(printf '%s' "$EV" | j cases.1.checks.0.detail)"
+chk "and carries its why"             "proves a failing assertion is reported, not swallowed" "$(printf '%s' "$EV" | j cases.1.checks.0.why)"
+chk "a skipped case says why"         "waiting on something" "$(printf '%s' "$EV" | j cases.2.skipped)"
+
+# A completed eval exits 0 however it scored: the code says the eval RAN.
+chk "a scored run still exits 0"      "0"       "$(code eval run quality)"
+# --strict is for a pipeline that should go red. Exit 1, not a spec band:
+# the tool worked, the agent did not.
+chk "--strict exits 1 on failures"    "1"       "$(code eval run quality --strict)"
+chk "and is typed"                    "eval_failed" "$(err_type)"
+chk "help-json documents that code"   "an eval run completed with failing assertions (only with --strict)" "$("$AHUB" help-json | j exit_codes.1)"
+
+chk "runs are recorded"               "quality" "$(a eval runs | j runs.0.eval)"
+
+# The question the whole feature exists to answer.
+cat > "$WORK/guard.json" <<'EVAL'
+{"name":"guard","agent":"clean","cases":[
+  {"name":"stays-clean","message":"hello","expect":[{"op":"not_contains","value":"mem=1"}]}]}
+EVAL
+a agent create --name clean --model m1 --system sys >/dev/null
+a eval create --file "$WORK/guard.json" >/dev/null
+BEFORE="$(a eval run guard | j run)"
+chk "before the change it passes"     "1"       "$(a eval runs --eval guard --limit 1 | j runs.0.passed)"
+a agent update clean --memory-project demo >/dev/null
+a eval run guard >"$WORK/after.json" 2>/dev/null
+AFTER="$(j run <"$WORK/after.json")"
+chk "after the change it fails"       "1"       "$(j failed <"$WORK/after.json")"
+CMP="$(a eval compare "$BEFORE" "$AFTER")"
+chk "compare names the regression"    "stays-clean" "$(printf '%s' "$CMP" | j regressed.0)"
+chk "and summarises it"               "0 fixed, 1 regressed, 0 still failing" "$(printf '%s' "$CMP" | j summary)"
+chk "compare needs two runs"          "82"      "$(code eval compare "$BEFORE")"
+
+# A field must be clearable, or a memory project could never be taken away.
+a agent update clean --memory-project "" >/dev/null
+chkin "clearing a field works"        "mem=0"   "$(a chat --agent clean --message hi | j content)"
+
+# The judge: the only assertion that spends tokens.
+cat > "$WORK/judged.json" <<'EVAL'
+{"name":"judged","agent":"helper","judge":"critic","cases":[
+  {"name":"asks-a-judge","message":"hello","expect":[{"op":"judge","value":"Is the answer relevant?"}]}]}
+EVAL
+a agent create --name critic --model m1 --system "you judge" >/dev/null
+a eval create --file "$WORK/judged.json" >/dev/null
+chk "validate counts the costly one"  "1"       "$(a eval validate --file "$WORK/judged.json" | j costly_assertions)"
+reply_mode '{"reply":"PASS\nthe answer addresses the question"}'
+JR="$(a eval run judged)"
+chk "a judge verdict of PASS passes"  "1"       "$(printf '%s' "$JR" | j passed)"
+chk "the judge reason is kept"        "the answer addresses the question" "$(printf '%s' "$JR" | j cases.0.checks.0.detail)"
+chk "judge tokens are counted apart"  "True"    "$(printf '%s' "$JR" | python3 -c 'import json,sys;print(json.load(sys.stdin)["judge_tokens"] > 0)')"
+reply_mode '{"reply":"FAIL\nit ignored the question"}'
+chk "a judge verdict of FAIL fails"   "1"       "$(a eval run judged | j failed)"
+reply_mode '{"reply":null}'
+
+# A case that could not run is a failure, not a skip: an outage must never
+# read as an improvement.
+curl -sf -X POST "$P/control/fail" -d '{"fail":true}' >/dev/null
+chk "an unreachable model fails cases" "1"      "$(a eval run guard | j failed)"
+chk "and records the error"           "True"    "$(a eval run guard | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["cases"][0]["error"]))')"
+curl -sf -X POST "$P/control/fail" -d '{"fail":false}' >/dev/null
 
 # --- schedules (autonomous runs) ----------------------------------------------
 # An schedule is a standing instruction: run this agent on this schedule with

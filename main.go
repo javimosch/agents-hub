@@ -60,6 +60,8 @@ func main() {
 		toolCmd(fl)
 	case "flow":
 		flowCmd(fl)
+	case "eval":
+		evalCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -184,6 +186,11 @@ func usage() {
   ahub schedule create --name <n> --agent <a> --prompt <p> [--every 6h|--at 03:20]
   ahub schedule run <name> | due | tick   tick runs everything due; a timer calls it
   ahub schedule list|show|rm|enable|disable|runs|scratchpad
+
+  ahub eval validate --file <e.json>    check assertions before paying for a run
+  ahub eval run <name> [--strict]       score an agent; --strict exits 1 on failure
+  ahub eval compare <before> <after>    what a change fixed, and what it broke
+  ahub eval create|list|show|rm|runs
 
   ahub install [--prefix <dir>]         put this binary on $PATH
   ahub update [--check] [--force]       fetch the published build

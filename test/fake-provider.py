@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Set through /control/*, not the environment: the server is started once and
 # the suite has to be able to change its behaviour per assertion.
-MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}'}
+MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}', "reply": None}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -29,6 +29,11 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/control/fail":
             MODE["fail"] = bool(req.get("fail"))
             return self._json(200, {"fail": MODE["fail"]})
+        if self.path == "/control/reply":
+            # Lets a test make the model answer a fixed string -- needed to
+            # play the judge in an eval, whose verdict must be parseable.
+            MODE["reply"] = req.get("reply")
+            return self._json(200, {"reply": MODE["reply"]})
         if self.path == "/control/tool":
             MODE["tool"] = req.get("tool")
             MODE["args"] = req.get("args", '{"query":"ports"}')
@@ -82,6 +87,12 @@ class H(BaseHTTPRequestHandler):
         pad = int(any("Your notes from previous runs" in m.get("content", "")
                       for m in msgs if m["role"] == "system"))
         users = sum(1 for m in msgs if m["role"] == "user")
+        if MODE["reply"] is not None:
+            usage = {"prompt_tokens": len(msgs), "completion_tokens": 5,
+                     "total_tokens": len(msgs) + 5}
+            return self._json(200, {"model": req.get("model"), "usage": usage,
+                "choices": [{"message": {"content": MODE["reply"]}, "finish_reason": "stop"}]})
+
         tool_out = " | ".join(m.get("content", "")[:40] for m in msgs if m["role"] == "tool")
         text = (f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} pad={pad} "
                 f"users={users} tools={len(req.get('tools') or [])} "

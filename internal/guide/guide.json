@@ -9,7 +9,8 @@
     "flows": "A flow is a path expressed as data: steps, a start, and where each goes next. Most step types cost nothing -- collect a value, branch on it, run an allowlisted CLI, call an allowlisted host -- and exactly one (ask) calls a model. A run pauses when it needs input and is resumed by id, so a wizard works in a tool that must never prompt.",
     "agents": "An agent is a saved configuration: a system prompt, a model, and optionally a memory project, skills and tools. It is the noun this tool is named after. `ahub chat --agent <name>` talks to one; a flow's ask step calls one; a schedule runs one unattended.",
     "schedules": "A schedule is a standing instruction: run this agent, on this cadence, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying history would make every run cost more than the last and eventually stop fitting; a note cannot.",
-    "what_it_is": "An agent is a saved prompt + model. A thread is a conversation with one agent. A chat is one turn. A flow is a deterministic path. A schedule runs an agent unattended."
+    "what_it_is": "An agent is a saved prompt + model. A thread is a conversation with one agent. A chat is one turn. A flow is a deterministic path. A schedule runs an agent unattended.",
+    "evals": "An eval is a set of cases with assertions, run against an agent, producing a pass rate and a cost. It is how a prompt, model, memory or tool change stops being an opinion. Most assertions are free to check; exactly one (judge) asks a model, and the report says how much that cost."
   },
   "loop": [
     {
@@ -83,6 +84,18 @@
     {
       "command": "ahub agent tick",
       "why": "Runs everything that is due. This is what a timer calls: one entry point, however many agents, no daemon holding state between them."
+    },
+    {
+      "command": "ahub eval validate --file quality.json",
+      "why": "Every regex compiles and every bound parses before a single token is spent finding out otherwise."
+    },
+    {
+      "command": "ahub eval run quality [--strict]",
+      "why": "Scores an agent, case by case, on stderr as it goes. Exits 0 however it scored; --strict exits 1 when assertions failed, for a pipeline or a schedule that should go red."
+    },
+    {
+      "command": "ahub eval compare <before> <after>",
+      "why": "The only question that matters after a change: what got fixed, what regressed, what still fails, and what it cost."
     }
   ],
   "concepts": [
@@ -157,6 +170,10 @@
     {
       "name": "agent vs schedule",
       "what": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences. \"Assistant\" is the internal project's word for the same thing and is not used here."
+    },
+    {
+      "name": "assertions",
+      "what": "contains, not_contains, equals, matches, max_tokens, max_steps, tool_used, tool_not_used and judge. All free except judge, which asks a second agent for a PASS/FAIL and a reason. Name a separate judge agent: a model grading its own homework is a weaker signal than a second one."
     }
   ],
   "gotchas": [
@@ -188,7 +205,12 @@
     "The scratchpad tool is always offered inside an agent run and is not subject to --allow-writes: it can only overwrite that one agent's own note, which the agent is the sole author of.",
     "A failed run still advances the schedule. An agent that stopped rescheduling when it broke would go quiet exactly when you needed it to keep complaining.",
     "`ahub agent tick` exits 105 if any agent failed, so a timer that always exits 0 does not hide a broken agent. The successful runs are recorded either way.",
-    "Re-enabling a disabled agent computes a fresh due time rather than firing once for every slot it slept through."
+    "Re-enabling a disabled agent computes a fresh due time rather than firing once for every slot it slept through.",
+    "An eval runs an agent with its real memory, skills and tools. Measuring it without them would measure a different agent than the one that answers real questions.",
+    "Each case gets a fresh thread, so a case cannot be influenced by the one above it in the file.",
+    "A case whose model call failed counts as FAILED, never skipped: an outage must never read as an improvement.",
+    "`ahub eval run` exits 0 whatever it scored -- the code says the eval ran, the data says how it went. --strict exits 1, deliberately outside cli-output-spec's 80-119 bands, because the tool worked and the agent did not. 105 would tell an agent to retry a failing eval and expect a different answer.",
+    "A judge assertion with no judge configured FAILS rather than passing: a check that silently becomes a no-op is worse than no check."
   ],
   "recipes": [
     {

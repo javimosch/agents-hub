@@ -70,14 +70,18 @@ func agentUpdate(h *hub.Hub, fl *flags) {
 	if v := fl.str("system"); v != "" {
 		fields["system"] = v
 	}
-	if v := fl.str("memory-project"); v != "" {
-		fields["memory_project"] = v
+	// These three are clearable: passing --memory-project "" removes it.
+	// Testing the flag's presence rather than its value is what makes
+	// "unset this" expressible at all -- without it a memory project, once
+	// set, could never be taken away except by deleting the agent.
+	if fl.has("memory-project") {
+		fields["memory_project"] = fl.str("memory-project")
 	}
-	if v := fl.str("skills"); v != "" {
-		fields["skills"] = splitList(v)
+	if fl.has("skills") {
+		fields["skills"] = splitList(fl.str("skills"))
 	}
-	if v := fl.str("tools"); v != "" {
-		fields["tools"] = splitList(v)
+	if fl.has("tools") {
+		fields["tools"] = splitList(fl.str("tools"))
 	}
 	if fl.model != "" {
 		fields["model"] = fl.model

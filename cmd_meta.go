@@ -27,6 +27,7 @@ func helpJSON() {
 			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
 			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"uninstall": cmd([]string{}, []string{"--prefix <dir>"}, false),
+			"eval":      cmd([]string{"validate|create|list|show|rm|run|runs|compare", "[name-or-run-ids]"}, []string{"--file <path>", "--agent <a>", "--judge <a>", "--strict", "--limit <n>"}, true),
 			"schedule":  cmd([]string{"create|list|show|rm|enable|disable|run|due|tick|runs|scratchpad", "[name]"}, []string{"--name <n>", "--agent <a>", "--prompt <p>", "--every <dur>", "--at <HH:MM>", "--tools <a,b>", "--skills <a,b>", "--memory-project <p>", "--max-steps <n>", "--timeout <s>", "--set <text>", "--clear", "--status <s>", "--limit <n>"}, true),
 			"flow":      cmd([]string{"validate|create|list|show|rm|run|resume|runs", "[name-or-run-id]"}, []string{"--file <path>", "--input <k=v> (repeatable)", "--max-steps <n>", "--step-timeout <s>", "--status <s>", "--limit <n>"}, true),
 			"skill":     cmd([]string{"search|recommend|show", "[name-or-text]"}, []string{"--query <q>", "--task <t>", "--limit <n>"}, false),
@@ -36,6 +37,7 @@ func helpJSON() {
 		},
 		"exit_codes": map[string]string{
 			"0":   "success",
+			"1":   "an eval run completed with failing assertions (only with --strict)",
 			"80":  "invalid arguments / unknown command",
 			"82":  "validation error (missing required field)",
 			"85":  "invalid argument value",

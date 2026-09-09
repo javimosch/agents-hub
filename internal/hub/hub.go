@@ -20,7 +20,7 @@ const (
 // Refs lists every collection the hub owns, in declare order.
 func Refs() []string {
 	return []string{RefAgents, RefThreads, RefMessages, RefFlows, RefFlowRuns,
-		RefSchedules, RefScheduleRuns}
+		RefSchedules, RefScheduleRuns, RefEvals, RefEvalRuns}
 }
 
 // Hub is the domain bound to one bkn client (and therefore one identity).

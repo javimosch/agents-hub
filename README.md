@@ -210,7 +210,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-231 assertions against a throwaway bkn, a real HTTP provider that echoes its
+267 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -228,6 +228,43 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 | cli-feedback-spec | not yet |
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
+
+## Evals: is it actually better?
+
+Every other feature here changes behaviour. None of those changes can be judged
+by reading them:
+
+```sh
+ahub eval validate --file quality.json     # before spending anything
+ahub eval run quality
+#   pass echoes-the-question (412 tokens)
+#   FAIL cites-the-source (388 tokens) contains: not found in the answer
+# {"passed":1,"failed":1,"pass_rate":"0.50","tokens":800,"judge_tokens":0}
+
+ahub agent update helper --memory-project machin      # a change
+ahub eval run quality --strict                        # exits 1 if it regressed
+ahub eval compare <before> <after>
+# {"summary":"0 fixed, 1 regressed, 0 still failing","regressed":["stays-clean"]}
+```
+
+| Assertion | Cost |
+|---|---|
+| `contains` `not_contains` `equals` `matches` | free |
+| `max_tokens` `max_steps` | free |
+| `tool_used` `tool_not_used` | free |
+| `judge` — a second agent returns PASS/FAIL plus a reason | tokens |
+
+An eval runs the agent **with its real memory, skills and tools** — measuring
+it without them would measure a different agent than the one answering real
+questions — and each case gets a fresh thread so it can't be influenced by the
+case above it. A case whose model call failed counts as **failed**, never
+skipped: an outage must not read as an improvement.
+
+`ahub eval run` exits 0 whatever it scored; the exit code says the eval *ran*,
+the data says how it went. `--strict` exits **1** — deliberately outside
+cli-output-spec's 80–119 bands, because the tool worked and the agent didn't,
+and 105 would tell an agent to retry a failing eval expecting a different
+answer.
 
 ## Schedules: autonomous runs
 
@@ -298,12 +335,13 @@ bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha2
 Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
 if you'd rather not use bkn for it.
 
-## What v0.7 is not
+## What v0.9 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
-in 2026), no evals, no sub-agents, no HITL, and no `loop` or `subflow` step
-yet. Evals are the next gap worth closing: nothing here can yet tell you
-whether a prompt, model or memory change made anything better. bkn already has `cron` and `hooks`, so triggering a flow on a
+in 2026), no sub-agents, no HITL, and no `loop` or `subflow` step yet. Nor is
+there prompt-improvement: the internal project's eval-analysis can propose and apply
+a better prompt from failed runs, and that only becomes worth building now that
+a proposal can be scored against the run it came from. bkn already has `cron` and `hooks`, so triggering a flow on a
 schedule or a webhook is wiring, not engine work.
 
 What remains of
