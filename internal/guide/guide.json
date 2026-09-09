@@ -1,0 +1,40 @@
+{
+  "tool": "ahub",
+  "one_liner": "Run a configured assistant from the command line, non-interactively, with the conversation stored durably in bkn.",
+  "model": {
+    "what_it_is": "An assistant is a saved prompt + model. A thread is a conversation with one assistant. A chat is one turn: your message in, the model's answer out, both appended to the thread.",
+    "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/assistants, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
+    "what_it_is_not": "Not a chat UI, not a daemon, and not an agent loop yet. One turn per invocation; no tool calling, no RAG, no sub-agents in v0.1."
+  },
+  "loop": [
+    {"command": "ahub setup --admin-token <t>", "why": "Once per bkn instance, by a human. Declares the collections and their owner-scoped access policy. Never needed again, and never run on the serving path."},
+    {"command": "ahub login --email <e> --password <p>", "why": "Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see."},
+    {"command": "ahub assistant create --name helper --model <m> --system \"...\"", "why": "Saves the configuration once so later turns are one short command."},
+    {"command": "ahub chat --assistant helper --message \"...\"", "why": "Opens a thread and answers. Prints the thread id; pass it back with --thread to continue."},
+    {"command": "ahub chat --assistant helper --thread <id> --message \"...\"", "why": "Continues an existing conversation. History is replayed to the model automatically."},
+    {"command": "ahub thread show <id>", "why": "The full transcript, in order, with per-message token counts."}
+  ],
+  "concepts": [
+    {"name": "owner scoping", "what": "bkn stamps every document with your user id from your token and filters reads by it. ahub never sends an owner field, so it cannot read or write another user's threads even if this code has a bug."},
+    {"name": "provider", "what": "Any OpenAI-compatible /chat/completions endpoint: OpenAI, Mistral, Ollama, vLLM, OpenRouter. Set it once with `ahub config set --provider-url ... --provider-key ...`."},
+    {"name": "profile", "what": "A named set of {bkn url, token, provider, model}, like an aws-cli profile. Switch with --profile or `ahub config set-profile <n>`."},
+    {"name": "seq", "what": "Messages are ordered by an integer seq, not by timestamp, so two messages written in the same millisecond can never come back swapped."}
+  ],
+  "gotchas": [
+    "The user message is stored before the model is called. A provider timeout costs you the answer, not the question: retry with the same --thread.",
+    "--stream emits NDJSON delta objects on stdout, then the final envelope. It is not bare text; parse per line.",
+    "An assistant name that matches two assistants is an error, not a coin flip. Use the id, or rename one.",
+    "Exit 105 means the model provider failed and a retry may work. Exit 90 means your token is wrong or expired and retrying will not help.",
+    "`ahub setup` needs the bkn ADMIN token; nothing else does. If a command asks you for the admin token, that is a bug.",
+    "Deleting an assistant leaves its threads: a conversation that happened is a fact, and dropping the config does not un-happen it."
+  ],
+  "recipes": [
+    {"command": "ahub chat --assistant helper --message \"$(cat prompt.txt)\" | jq -r .content", "why": "The answer alone, for a pipeline."},
+    {"command": "ahub thread list --assistant helper --limit 5", "why": "The five most recently touched conversations with one assistant."},
+    {"command": "ahub chat --assistant helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'", "why": "Watch the answer arrive while still getting a parseable stream."}
+  ],
+  "see_also": {
+    "help-json": "ahub help-json - the command catalog: every command, flag, and exit code",
+    "bkn": "bkn guide - the backend this tool stores everything in"
+  }
+}

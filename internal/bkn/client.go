@@ -1,0 +1,277 @@
+// Package bkn is the HTTP client for a bkn backend core.
+//
+// agents-hub stores nothing itself. Assistants, threads and messages are
+// documents in bkn collections, identity is bkn auth, and tenancy is enforced
+// by the collection's declared access policy rather than by filters this
+// package remembers to add. That is the point of the split: a bug here cannot
+// hand one user another user's threads, because this client never gets to
+// state whose data it is asking for.
+package bkn
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// Record is a stored document: a flat object carrying its own "id".
+type Record map[string]any
+
+// Str reads a string field, returning "" when absent or of another type.
+func (r Record) Str(k string) string {
+	s, _ := r[k].(string)
+	return s
+}
+
+// Num reads a numeric field as float64 (JSON's only number type).
+func (r Record) Num(k string) float64 {
+	f, _ := r[k].(float64)
+	return f
+}
+
+// Tokens is what a login or refresh returns. The field names are bkn's, not
+// a convention: access_token is a stateless JWT with a short TTL, and
+// refresh_token is the stateful, revocable half.
+type Tokens struct {
+	Access    string `json:"access_token"`
+	Refresh   string `json:"refresh_token"`
+	TokenType string `json:"token_type"`
+	ExpiresIn int    `json:"expires_in"`
+	User      Record `json:"user"`
+	Org       string `json:"org,omitempty"`
+}
+
+// APIError is a non-2xx answer from bkn, carrying bkn's own error type so a
+// caller can branch on the category rather than on the message text.
+type APIError struct {
+	Status  int
+	Type    string
+	Message string
+}
+
+func (e *APIError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("bkn returned %d", e.Status)
+	}
+	return e.Message
+}
+
+// NotFound reports whether the error is a bkn 404.
+func NotFound(err error) bool {
+	var e *APIError
+	if ok := asAPI(err, &e); ok {
+		return e.Status == http.StatusNotFound
+	}
+	return false
+}
+
+// Unauthorized reports whether the error is a bkn 401/403.
+func Unauthorized(err error) bool {
+	var e *APIError
+	if ok := asAPI(err, &e); ok {
+		return e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
+	}
+	return false
+}
+
+func asAPI(err error, target **APIError) bool {
+	e, ok := err.(*APIError)
+	if ok {
+		*target = e
+	}
+	return ok
+}
+
+// TransportError is a request that never got an answer: DNS, refused
+// connection, timeout. It is separate from APIError because the two demand
+// opposite responses -- a transport failure is worth retrying, a 400 is not.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string { return e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// Transport reports whether err is a transport failure.
+func Transport(err error) bool {
+	_, ok := err.(*TransportError)
+	return ok
+}
+
+// FromBackend reports whether err came from bkn at all, as opposed to from
+// the caller's own validation.
+func FromBackend(err error) bool {
+	if _, ok := err.(*APIError); ok {
+		return true
+	}
+	return Transport(err)
+}
+
+// Client talks to one bkn instance with one token.
+type Client struct {
+	BaseURL string
+	Token   string
+	HTTP    *http.Client
+}
+
+// New builds a client. A zero timeout means 30s: an agent waiting on a hung
+// backend forever is worse than an agent told the backend is unreachable.
+func New(baseURL, token string, timeout time.Duration) *Client {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return &Client{
+		BaseURL: strings.TrimRight(baseURL, "/"),
+		Token:   token,
+		HTTP:    &http.Client{Timeout: timeout},
+	}
+}
+
+// WithToken returns a copy bound to a different token. Used for the one call
+// that legitimately needs the admin token, so the admin token never leaks onto
+// the serving path by sharing a client.
+func (c *Client) WithToken(token string) *Client {
+	cp := *c
+	cp.Token = token
+	return &cp
+}
+
+func (c *Client) do(method, path string, body any, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, c.BaseURL+path, rdr)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return &TransportError{Err: fmt.Errorf("bkn unreachable at %s: %w", c.BaseURL, err)}
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		ae := &APIError{Status: resp.StatusCode}
+		var env struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &env) == nil {
+			ae.Type, ae.Message = env.Error.Type, env.Error.Message
+		}
+		if ae.Message == "" {
+			ae.Message = strings.TrimSpace(string(raw))
+		}
+		return ae
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(raw, out)
+}
+
+// Health probes the instance. It is the cheapest way to tell "bkn is down"
+// from "your token is wrong", two failures an agent must not conflate.
+func (c *Client) Health() error {
+	return c.do(http.MethodGet, "/_health", nil, nil)
+}
+
+// Login exchanges credentials for tokens. org may be empty.
+func (c *Client) Login(email, password, org string) (Tokens, error) {
+	body := map[string]any{"email": email, "password": password}
+	if org != "" {
+		body["org"] = org
+	}
+	var out struct {
+		Tokens Tokens `json:"tokens"`
+	}
+	err := c.do(http.MethodPost, "/v1/auth/login", body, &out)
+	return out.Tokens, err
+}
+
+// Refresh trades a refresh token for a new pair.
+func (c *Client) Refresh(refresh string) (Tokens, error) {
+	var out struct {
+		Tokens Tokens `json:"tokens"`
+	}
+	err := c.do(http.MethodPost, "/v1/auth/refresh", map[string]any{"refresh_token": refresh}, &out)
+	return out.Tokens, err
+}
+
+// Me returns the caller bkn believes it is talking to.
+func (c *Client) Me() (Record, error) {
+	var out Record
+	err := c.do(http.MethodGet, "/v1/auth/me", nil, &out)
+	return out, err
+}
+
+// Declare creates or updates a collection and its access policy. Admin only.
+func (c *Client) Declare(ref string, body map[string]any) error {
+	return c.do(http.MethodPut, "/v1/store/"+ref, body, nil)
+}
+
+// Create writes a new document into a collection.
+func (c *Client) Create(ref string, doc map[string]any) (Record, error) {
+	var out struct {
+		Record Record `json:"record"`
+	}
+	err := c.do(http.MethodPost, "/v1/store/"+ref, doc, &out)
+	return out.Record, err
+}
+
+// Get reads one document by id.
+func (c *Client) Get(ref, id string) (Record, error) {
+	var out struct {
+		Record Record `json:"record"`
+	}
+	err := c.do(http.MethodGet, "/v1/store/"+ref+"/"+url.PathEscape(id), nil, &out)
+	return out.Record, err
+}
+
+// List reads a page of a collection. Filters go in q as field=value, with
+// bkn's operator prefixes available (?created_at=gt:...).
+func (c *Client) List(ref string, q url.Values) ([]Record, error) {
+	path := "/v1/store/" + ref
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var out struct {
+		Records []Record `json:"records"`
+	}
+	err := c.do(http.MethodGet, path, nil, &out)
+	return out.Records, err
+}
+
+// Patch merges fields into an existing document.
+func (c *Client) Patch(ref, id string, doc map[string]any) (Record, error) {
+	var out struct {
+		Record Record `json:"record"`
+	}
+	err := c.do(http.MethodPatch, "/v1/store/"+ref+"/"+url.PathEscape(id), doc, &out)
+	return out.Record, err
+}
+
+// Delete removes a document.
+func (c *Client) Delete(ref, id string) error {
+	return c.do(http.MethodDelete, "/v1/store/"+ref+"/"+url.PathEscape(id), nil, nil)
+}

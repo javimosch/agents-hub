@@ -1,0 +1,5 @@
+/bin/
+/ahub
+*.db
+*.db-shm
+*.db-wal

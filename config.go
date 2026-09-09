@@ -1,0 +1,140 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+// Config is everything ahub needs to reach its two dependencies: a bkn
+// instance for state and identity, and a model provider for answers.
+//
+// Resolution order is flags > env > profile > default, and it is deliberately
+// the same order another CLI uses -- an agent that has learned one of these tools
+// should not have to relearn where the token comes from.
+type Config struct {
+	BknURL      string `json:"bkn_url,omitempty"`
+	Token       string `json:"token,omitempty"`
+	Refresh     string `json:"refresh,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+	ProviderURL string `json:"provider_url,omitempty"`
+	ProviderKey string `json:"provider_key,omitempty"`
+	Model       string `json:"model,omitempty"`
+	TimeoutSecs int    `json:"timeout_secs,omitempty"`
+}
+
+// File is the on-disk shape: named profiles plus which one is active.
+type File struct {
+	ActiveProfile string            `json:"activeProfile,omitempty"`
+	Profiles      map[string]Config `json:"profiles,omitempty"`
+}
+
+const (
+	defaultBkn      = "http://127.0.0.1:7799"
+	defaultProvider = "openai"
+	defaultProfile  = "default"
+)
+
+// configPath is where a profile is written. It follows XDG so a container can
+// relocate the whole thing with one variable.
+func configPath() string {
+	if p := os.Getenv("AHUB_CONFIG"); p != "" {
+		return p
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "agents-hub.json"
+		}
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "agents-hub", "config.json")
+}
+
+func loadFile() (File, error) {
+	var f File
+	raw, err := os.ReadFile(configPath())
+	if os.IsNotExist(err) {
+		return File{Profiles: map[string]Config{}}, nil
+	}
+	if err != nil {
+		return f, err
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return f, fmt.Errorf("%s is not valid JSON: %w", configPath(), err)
+	}
+	if f.Profiles == nil {
+		f.Profiles = map[string]Config{}
+	}
+	return f, nil
+}
+
+func saveFile(f File) error {
+	p := configPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	// 0600: this file holds a bearer token and a provider API key.
+	return os.WriteFile(p, append(b, '\n'), 0o600)
+}
+
+func profileName(fl *flags, f File) string {
+	if fl.profile != "" {
+		return fl.profile
+	}
+	if v := os.Getenv("AHUB_PROFILE"); v != "" {
+		return v
+	}
+	if f.ActiveProfile != "" {
+		return f.ActiveProfile
+	}
+	return defaultProfile
+}
+
+// resolve merges the three sources into one config.
+func resolve(fl *flags) (Config, string, error) {
+	f, err := loadFile()
+	if err != nil {
+		return Config{}, "", err
+	}
+	name := profileName(fl, f)
+	c := f.Profiles[name]
+
+	pick := func(flagV, envK, cur, def string) string {
+		if flagV != "" {
+			return flagV
+		}
+		if v := os.Getenv(envK); v != "" {
+			return v
+		}
+		if cur != "" {
+			return cur
+		}
+		return def
+	}
+	c.BknURL = pick(fl.bknURL, "AHUB_BKN_URL", c.BknURL, defaultBkn)
+	c.Token = pick(fl.token, "AHUB_TOKEN", c.Token, "")
+	c.Provider = pick(fl.provider, "AHUB_PROVIDER", c.Provider, defaultProvider)
+	c.ProviderURL = pick(fl.providerURL, "AHUB_PROVIDER_URL", c.ProviderURL, "")
+	c.ProviderKey = pick("", "AHUB_PROVIDER_KEY", c.ProviderKey, "")
+	c.Model = pick(fl.model, "AHUB_MODEL", c.Model, "")
+	if c.TimeoutSecs == 0 {
+		c.TimeoutSecs = 120
+	}
+	if v := os.Getenv("AHUB_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.TimeoutSecs = n
+		}
+	}
+	return c, name, nil
+}
+
+func (c Config) timeout() time.Duration { return time.Duration(c.TimeoutSecs) * time.Second }
