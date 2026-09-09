@@ -54,6 +54,8 @@ func main() {
 		memoryCmd(fl)
 	case "skill":
 		skillCmd(fl)
+	case "tool":
+		toolCmd(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"unknown command: "+cmd, "ahub help-json", "ahub guide")
@@ -157,6 +159,7 @@ func usage() {
   ahub memory status|projects|read <id[/slug]>
 
   ahub skill search <q> | recommend <task> | show <name>
+  ahub tool list                                   what a model may be given
 
   ahub guide [--human]                  the mental model
   ahub help-json                        the command catalog

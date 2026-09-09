@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -42,8 +43,20 @@ func (o *openAI) Chat(ctx context.Context, req Request, onDelta func(string)) (*
 	stream := onDelta != nil
 	body := map[string]any{
 		"model":    req.Model,
-		"messages": mergeSystem(req.Messages),
+		"messages": wireMessages(mergeSystem(req.Messages)),
 		"stream":   stream,
+	}
+	if len(req.Tools) > 0 {
+		tools := make([]map[string]any, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			tools = append(tools, map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": t.Name, "description": t.Description, "parameters": t.Parameters,
+				},
+			})
+		}
+		body["tools"] = tools
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
@@ -85,6 +98,39 @@ func (o *openAI) Chat(ctx context.Context, req Request, onDelta func(string)) (*
 	return o.readWhole(resp.Body)
 }
 
+// wireMessages maps this package's message onto the shape the API expects.
+//
+// The differences are small and all load-bearing: a tool result carries
+// tool_call_id and no tool_calls, an assistant turn that asked for work
+// carries tool_calls and often an empty content, and content must still be
+// present as a key even when empty or some servers reject the message.
+func wireMessages(msgs []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		w := map[string]any{"role": m.Role, "content": m.Content}
+		if m.Role == RoleTool {
+			w["tool_call_id"] = m.ToolCallID
+			if m.Name != "" {
+				w["name"] = m.Name
+			}
+			out = append(out, w)
+			continue
+		}
+		if len(m.ToolCalls) > 0 {
+			calls := make([]map[string]any, 0, len(m.ToolCalls))
+			for _, c := range m.ToolCalls {
+				calls = append(calls, map[string]any{
+					"id": c.ID, "type": "function",
+					"function": map[string]any{"name": c.Name, "arguments": c.Arguments},
+				})
+			}
+			w["tool_calls"] = calls
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 // mergeSystem collapses the leading run of system messages into one.
 //
 // Several servers behind this wire shape keep only the first system message
@@ -111,14 +157,37 @@ func mergeSystem(msgs []Message) []Message {
 	return append(out, msgs[n:]...)
 }
 
+// oaToolCall is the wire form of a tool call. In a stream, Index identifies
+// which call a fragment belongs to and Arguments arrives a few characters at
+// a time, so fragments must be accumulated per index rather than per message.
+type oaToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 type oaChoice struct {
 	Message struct {
-		Content string `json:"content"`
+		Content   string       `json:"content"`
+		ToolCalls []oaToolCall `json:"tool_calls"`
 	} `json:"message"`
 	Delta struct {
-		Content string `json:"content"`
+		Content   string       `json:"content"`
+		ToolCalls []oaToolCall `json:"tool_calls"`
 	} `json:"delta"`
 	FinishReason string `json:"finish_reason"`
+}
+
+func toolCallsFrom(in []oaToolCall) []ToolCall {
+	out := make([]ToolCall, 0, len(in))
+	for _, c := range in {
+		out = append(out, ToolCall{ID: c.ID, Name: c.Function.Name, Arguments: c.Function.Arguments})
+	}
+	return out
 }
 
 type oaResponse struct {
@@ -139,6 +208,7 @@ func (o *openAI) readWhole(r io.Reader) (*Response, error) {
 		Content:      body.Choices[0].Message.Content,
 		Model:        body.Model,
 		FinishReason: body.Choices[0].FinishReason,
+		ToolCalls:    toolCallsFrom(body.Choices[0].Message.ToolCalls),
 	}
 	if body.Usage != nil {
 		out.Usage = *body.Usage
@@ -152,6 +222,11 @@ func (o *openAI) readWhole(r io.Reader) (*Response, error) {
 func (o *openAI) readStream(r io.Reader, onDelta func(string)) (*Response, error) {
 	var sb strings.Builder
 	out := &Response{}
+	// Accumulated by index, then flattened in index order at the end: the
+	// fragments of one call's arguments arrive across many events, and the
+	// events for two calls are interleaved.
+	calls := map[int]*ToolCall{}
+	var order []int
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -178,6 +253,21 @@ func (o *openAI) readStream(r io.Reader, onDelta func(string)) (*Response, error
 				sb.WriteString(c.Delta.Content)
 				onDelta(c.Delta.Content)
 			}
+			for _, tc := range c.Delta.ToolCalls {
+				acc, seen := calls[tc.Index]
+				if !seen {
+					acc = &ToolCall{}
+					calls[tc.Index] = acc
+					order = append(order, tc.Index)
+				}
+				if tc.ID != "" {
+					acc.ID = tc.ID
+				}
+				if tc.Function.Name != "" {
+					acc.Name = tc.Function.Name
+				}
+				acc.Arguments += tc.Function.Arguments
+			}
 			if c.FinishReason != "" {
 				out.FinishReason = c.FinishReason
 			}
@@ -187,5 +277,9 @@ func (o *openAI) readStream(r io.Reader, onDelta func(string)) (*Response, error
 		return nil, fmt.Errorf("stream broke: %w", err)
 	}
 	out.Content = sb.String()
+	sort.Ints(order)
+	for _, i := range order {
+		out.ToolCalls = append(out.ToolCalls, *calls[i])
+	}
 	return out, nil
 }

@@ -225,6 +225,73 @@ chk "--skills-required makes it fatal" "92"     "$(code chat --assistant skilled
 chk "a non-markdown skill is refused" "85"      "$(FAKE_SKILL_BADPATH=1 code skill show bad-skill)"
 chkin "and it says why"               "not markdown" "$(j error.message <"$WORK/err")"
 
+# --- tools -----------------------------------------------------------------
+# The fake model asks for one tool, then answers with the result in its
+# history: the same two-pass shape a real model produces.
+chk "the catalog needs nothing"       "4"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
+chk "the catalog marks what writes"   "memory_save" "$("$AHUB" tool list | python3 -c 'import json,sys;print(",".join(t["name"] for t in json.load(sys.stdin)["tools"] if t["writes"]))')"
+chk "an unknown tool is refused"      "85"      "$(code chat --assistant helper --tools no_such_tool --message x)"
+chkin "and it lists the real ones"    "memory_recall" "$(j error.message <"$WORK/err")"
+chk "a writing tool needs consent"    "85"      "$(code chat --assistant helper --tools memory_save --message x)"
+chkin "and it says which flag"        "--allow-writes" "$(j error.message <"$WORK/err")"
+chk "consent enables it"              "True"    "$(a chat --assistant helper --tools memory_save --allow-writes --message x | j ok)"
+
+T1="$(a chat --assistant helper --tools memory_recall --message "how do I release a port")"
+chk "the loop ran two steps"          "2"       "$(printf '%s' "$T1" | j steps)"
+chk "the tool ran"                    "memory_recall" "$(printf '%s' "$T1" | j tool_runs.0.name)"
+chk "the tool produced output"        "True"    "$(printf '%s' "$T1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tool_runs"][0]["chars"] > 0)')"
+chkin "the result reached the model"  "toolout=## Recalled memories" "$(printf '%s' "$T1" | j content)"
+chk "usage is summed across steps"    "True"    "$(printf '%s' "$T1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["usage"]["completion_tokens"] > 7)')"
+
+TT="$(printf '%s' "$T1" | j thread)"
+chk "the tool turns are stored"       "tool"    "$(a thread show "$TT" | j messages.2.role)"
+chk "the call is stored with them"    "True"    "$(a thread show "$TT" | python3 -c 'import json,sys
+msgs = json.load(sys.stdin)["messages"]
+print(any(m["role"]=="assistant" and m.get("tool_calls") for m in msgs))')"
+chk "the tool turn keeps its id"      "call_1"  "$(a thread show "$TT" | j messages.2.tool_call_id)"
+
+# Resuming a thread that contains tool turns must replay them intact: a
+# provider rejects a tool result whose matching call is missing.
+R="$(a chat --assistant helper --thread "$TT" --tools memory_recall --message "and now?")"
+chk "a thread with tool turns resumes" "True"   "$(printf '%s' "$R" | j ok)"
+chkin "the replay kept the tool role" "roles=system,user,assistant,tool" "$(printf '%s' "$R" | j content)"
+
+# A tool that fails answers the model instead of killing the turn.
+chk "a failing tool still answers"    "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --assistant helper --tools memory_recall --message x | j ok)"
+chk "and the failure is reported"     "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --assistant helper --tools memory_recall --message x | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["tool_runs"][0]["failed"]))')"
+
+# The step cap is a budget, so hitting it is said out loud. When the model
+# never produced text, that is a failure with a resumable thread, not an
+# answer: ok:true with an empty string is the worst thing to hand an agent.
+chk "max-steps without an answer fails" "105"   "$(code chat --assistant helper --tools memory_recall --max-steps 1 --message x)"
+chk "and it is typed"                 "max_steps_exhausted" "$(err_type)"
+chkin "and it says how to resume"     "--max-steps 20" "$(j error.suggestions.0 <"$WORK/err")"
+
+# A tool called with a missing required parameter is told which one, rather
+# than being handed whatever error an empty string produces downstream.
+tool_mode() { curl -sf -X POST "$P/control/tool" -d "$1" >/dev/null; }
+tool_mode '{"args":"{\"nope\":\"x\"}"}'
+MA="$(a chat --assistant helper --tools memory_recall --message x)"
+chkin "a missing parameter is named"  "requires the parameter" "$(printf '%s' "$MA" | j content)"
+chk "and the run records it"          "missing required parameter query" "$(printf '%s' "$MA" | j tool_runs.0.failed)"
+
+# A hallucinated tool name gets the real list back, so the model can correct.
+tool_mode '{"tool":"memory_search","args":"{}"}'
+HT="$(a chat --assistant helper --tools memory_recall,skill_show --message x)"
+chkin "an unknown tool lists the real ones" "Available tools: memory_recall, skill_show" "$(printf '%s' "$HT" | j content)"
+tool_mode '{"args":"{\"query\":\"ports\"}"}'   # back to the default for later sections
+
+# Streamed tool calls are accumulated from fragments.
+ST="$(a chat --assistant helper --tools memory_recall --stream --message "stream a tool")"
+chk "a streamed tool call works"      "True"    "$(printf '%s' "$ST" | tail -1 | j ok)"
+chk "the streamed loop ran twice"     "2"       "$(printf '%s' "$ST" | tail -1 | j steps)"
+
+# An assistant can carry its tools.
+a assistant create --name tooled --model m1 --system sys --tools memory_recall,skill_show >/dev/null
+chk "a configured tool set is used"   "2"       "$(a chat --assistant tooled --message x | j steps)"
+chk "--no-tools wins"                 "1"       "$(a chat --assistant tooled --no-tools --message x | j steps)"
+chk "a turn without tools is one step" "1"      "$(a chat --assistant helper --message x | j steps)"
+
 # --- token refresh ---------------------------------------------------------
 # A bkn access token is a 15-minute JWT. An agent must not have to notice.
 python3 -c '

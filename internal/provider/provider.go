@@ -21,10 +21,40 @@ const (
 	RoleAssistant = "assistant"
 )
 
+// Tool roles. A tool result is a turn in the conversation like any other,
+// which is why it is stored and replayed like any other.
+const RoleTool = "tool"
+
 // Message is one turn.
+//
+// ToolCalls belong to an assistant turn that asked for work; ToolCallID and
+// Name belong to the tool turn that answered one. Both must survive a round
+// trip through storage: a provider rejects a tool result whose matching call
+// is not in the same conversation, so a thread that drops either half cannot
+// be resumed at all.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+// Tool is a function the model may ask to have run. Parameters is a JSON
+// Schema object.
+type Tool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// ToolCall is one such request. Arguments is raw JSON as the model produced
+// it -- unparsed on purpose, because a model that emits invalid JSON should
+// be told so rather than have this layer guess what it meant.
+type ToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // Request is a completion ask. Temperature is a pointer because "unset" and
@@ -34,6 +64,7 @@ type Request struct {
 	Messages    []Message
 	Temperature *float64
 	MaxTokens   int
+	Tools       []Tool
 }
 
 // Usage is the token accounting a provider reports back.
@@ -45,10 +76,11 @@ type Usage struct {
 
 // Response is a completed turn.
 type Response struct {
-	Content      string `json:"content"`
-	Model        string `json:"model"`
-	FinishReason string `json:"finish_reason,omitempty"`
-	Usage        Usage  `json:"usage"`
+	Content      string     `json:"content"`
+	Model        string     `json:"model"`
+	FinishReason string     `json:"finish_reason,omitempty"`
+	Usage        Usage      `json:"usage"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // Provider is what the chat engine depends on. onDelta, when non-nil, is

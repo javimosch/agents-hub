@@ -39,6 +39,7 @@ func assistantCreate(h *hub.Hub, fl *flags) {
 		Provider:      fl.str("provider-name"),
 		MemoryProject: fl.str("memory-project"),
 		Skills:        splitList(fl.str("skills")),
+		Tools:         splitList(fl.str("tools")),
 		Temperature:   temp,
 		MaxTokens:     fl.intVal("max-tokens", 0),
 	})
@@ -74,6 +75,9 @@ func assistantUpdate(h *hub.Hub, fl *flags) {
 	}
 	if v := fl.str("skills"); v != "" {
 		fields["skills"] = splitList(v)
+	}
+	if v := fl.str("tools"); v != "" {
+		fields["tools"] = splitList(v)
 	}
 	if fl.model != "" {
 		fields["model"] = fl.model

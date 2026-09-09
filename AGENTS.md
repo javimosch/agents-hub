@@ -15,7 +15,8 @@ the question "what would this cost us at deploy time?".
 | Path | What |
 |---|---|
 | `main.go`, `cmd_*.go`, `flags.go`, `config.go` | the CLI surface |
-| `internal/hub` | the domain: assistants, threads, messages, the chat turn |
+| `internal/hub` | the domain: assistants, threads, messages, the chat turn, the tool loop |
+| `internal/memory` | the memgraph wrapper: recall, skills, and the rules that keep it safe |
 | `internal/bkn` | HTTP client for the backend; the only place that knows bkn's wire shapes |
 | `internal/provider` | the model layer: one interface, one OpenAI-compatible impl |
 | `internal/out` | cli-output-spec plumbing (a deliberate copy of bkn's) |
@@ -37,6 +38,14 @@ repo runs on.
   millisecond must not be free to come back swapped.
 - **No internal retries** (cli-output-spec §3). Report `recoverable: true` and
   exit; the agent decides.
+- **Never build a shell command from model or user text.** Everything that
+  reaches a subprocess goes through `internal/memory` with explicit argv and a
+  validated value; a value that could read as a flag is refused, not escaped.
+- **A tool failure goes back to the model, a turn failure goes back to the
+  agent.** The first is information the model can act on; the second is a
+  stored, resumable thread plus an exit code.
+- **Anything that writes needs a second gate.** Naming a tool enables it;
+  `--allow-writes` is what permits mutation.
 
 ## Before committing
 
@@ -47,6 +56,14 @@ gofmt -l . && go vet ./... && go build -o bin/ahub . && bash test/t-hub.sh
 The suite needs a `bkn` binary (`BKN_BIN`, default `~/ai/bkn/bin/bkn`) and
 python3. It builds its own throwaway database and provider on random ports, so
 it is re-runnable and leaves nothing behind.
+
+## Test against a real model before believing it
+
+The mock cannot tell you that DeepSeek drops your second system message, that
+a model will omit a project name it considers context, or that it will invent
+a tool that does not exist and retry it until the step cap. All three were
+found by pointing the binary at OpenRouter and reading `prompt_tokens` and
+`tool_runs`. Do that before claiming a feature works.
 
 ## Adding a provider
 

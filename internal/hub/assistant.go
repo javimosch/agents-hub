@@ -29,7 +29,11 @@ type Assistant struct {
 	// Skills names procedures to load before each turn, resolved through
 	// memgraph's skill graph. Unlike memories, a skill is instruction: it is
 	// loaded only because someone named it here or on the command line.
-	Skills    []string `json:"skills,omitempty"`
+	Skills []string `json:"skills,omitempty"`
+	// Tools names what this assistant may ask to have run. Empty means it
+	// answers from what it was given, which stays the default: a tool loop
+	// costs money and reaches outside the conversation.
+	Tools     []string `json:"tools,omitempty"`
 	CreatedAt string   `json:"created_at,omitempty"`
 	UpdatedAt string   `json:"updated_at,omitempty"`
 }
@@ -49,9 +53,8 @@ func assistantFrom(r bkn.Record) Assistant {
 	if v, ok := r["temperature"].(float64); ok {
 		a.Temperature = &v
 	}
-	for _, x := range asList(r["skills"]) {
-		a.Skills = append(a.Skills, x)
-	}
+	a.Skills = append(a.Skills, asList(r["skills"])...)
+	a.Tools = append(a.Tools, asList(r["tools"])...)
 	return a
 }
 
@@ -97,6 +100,9 @@ func (h *Hub) CreateAssistant(a Assistant) (Assistant, error) {
 	}
 	if len(a.Skills) > 0 {
 		doc["skills"] = a.Skills
+	}
+	if len(a.Tools) > 0 {
+		doc["tools"] = a.Tools
 	}
 	if a.Temperature != nil {
 		doc["temperature"] = *a.Temperature

@@ -4,8 +4,9 @@
   "model": {
     "what_it_is": "An assistant is a saved prompt + model. A thread is a conversation with one assistant. A chat is one turn: your message in, the model's answer out, both appended to the thread.",
     "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/assistants, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
-    "what_it_is_not": "Not a chat UI, not a daemon, and not an agent loop yet. One turn per invocation; no tool calling and no sub-agents in v0.2. There is deliberately no RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text.",
-    "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them."
+    "what_it_is_not": "Not a chat UI and not a daemon. No RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text. No sub-agents, HITL or workflows yet.",
+    "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them.",
+    "tools": "An assistant may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per assistant or per call, every one is backed by memgraph, and anything that writes needs --allow-writes as well."
   },
   "loop": [
     {
@@ -43,6 +44,14 @@
     {
       "command": "ahub skill recommend \"<task>\"",
       "why": "Ask memgraph's skill graph which procedure fits, then `ahub skill show <name>` to read it before spending tokens on it."
+    },
+    {
+      "command": "ahub tool list",
+      "why": "What a model can be given. Needs no token and no backend: discover the surface before wiring anything."
+    },
+    {
+      "command": "ahub chat --assistant helper --tools memory_recall,skill_show --message \"...\"",
+      "why": "Let the model look things up for itself. The answer reports steps and tool_runs, so you can see what it actually did."
     }
   ],
   "concepts": [
@@ -73,6 +82,14 @@
     {
       "name": "budget",
       "what": "Recalled memories are capped per-memory and in total (default 1200/6000 characters). This is the difference between memory as a feature and memory as a bill, since the block is re-sent every turn."
+    },
+    {
+      "name": "the tool loop",
+      "what": "Up to --max-steps (default 8) passes: each pass either answers or asks for tools, whose results are appended and fed back. Every assistant and tool turn is stored, so a thread with tool calls resumes correctly."
+    },
+    {
+      "name": "two gates on writes",
+      "what": "Naming a tool enables it; a tool that changes state needs --allow-writes too. 'Give it tools' and 'let it change things' are different decisions and one flag would collapse them."
     }
   ],
   "gotchas": [
@@ -86,7 +103,11 @@
     "A memory or skill that cannot be loaded degrades the turn instead of failing it, and says so in the answer's `memory.error` / `skills.skipped`. Pass --memory-required or --skills-required to make it fatal.",
     "Several servers behind the OpenAI wire shape keep only the FIRST system message; ahub merges the leading run into one, which is what makes an injected memory block actually arrive.",
     "The provider timeout is separate from the bkn timeout (AHUB_PROVIDER_TIMEOUT, default 300s). A reasoning model with a large prompt will exceed a database-shaped timeout.",
-    "An expired access token is refreshed and re-persisted automatically -- but only for a token that came from the profile. A token passed in by --token or AHUB_TOKEN is yours to manage."
+    "An expired access token is refreshed and re-persisted automatically -- but only for a token that came from the profile. A token passed in by --token or AHUB_TOKEN is yours to manage.",
+    "A tool failure is returned to the model as the tool's result, not raised. It can then try something else, and the failure is still visible in tool_runs[].failed.",
+    "Running out of steps with no answer is exit 105 (max_steps_exhausted), not a successful empty answer. The thread is stored: resume it with --thread and a bigger --max-steps.",
+    "memory_recall defaults its project to the assistant's memory_project. Without that a model omits the project (it reads as context, not a parameter), every call fails, and it retries the same shape until the cap.",
+    "Usage is summed across every step of the loop, not just the last call."
   ],
   "recipes": [
     {
@@ -112,6 +133,10 @@
     {
       "command": "ahub chat ... | jq '{answer:.content, remembered:.memory.used, skills:.skills.loaded}'",
       "why": "The answer plus exactly what informed it."
+    },
+    {
+      "command": "ahub chat --assistant agent --tools memory_recall --message '...' | jq '{answer:.content, steps, tools:[.tool_runs[].name]}'",
+      "why": "The answer plus the path it took to get there."
     }
   ],
   "see_also": {

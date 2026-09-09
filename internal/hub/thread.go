@@ -32,6 +32,14 @@ type Message struct {
 	Prompt    int    `json:"prompt_tokens,omitempty"`
 	Completed int    `json:"completion_tokens,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
+
+	// ToolCalls is the raw JSON array an assistant turn asked for, stored as
+	// a string rather than a nested object: the store would normalise the
+	// object, and what has to survive here is exactly the bytes the provider
+	// will be shown again when this thread is resumed.
+	ToolCalls  string `json:"tool_calls,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
 }
 
 func threadFrom(r bkn.Record) Thread {
@@ -57,6 +65,10 @@ func messageFrom(r bkn.Record) Message {
 		Prompt:    int(r.Num("prompt_tokens")),
 		Completed: int(r.Num("completion_tokens")),
 		CreatedAt: r.Str("created_at"),
+
+		ToolCalls:  r.Str("tool_calls"),
+		ToolCallID: r.Str("tool_call_id"),
+		Name:       r.Str("name"),
 	}
 }
 
@@ -151,6 +163,15 @@ func (h *Hub) AppendMessage(m Message) (Message, error) {
 	}
 	if m.Completed > 0 {
 		doc["completion_tokens"] = m.Completed
+	}
+	if m.ToolCalls != "" {
+		doc["tool_calls"] = m.ToolCalls
+	}
+	if m.ToolCallID != "" {
+		doc["tool_call_id"] = m.ToolCallID
+	}
+	if m.Name != "" {
+		doc["name"] = m.Name
 	}
 	rec, err := h.C.Create(RefMessages, doc)
 	if err != nil {

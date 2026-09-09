@@ -2,7 +2,9 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/provider"
@@ -18,6 +20,18 @@ type Turn struct {
 	Finish    string         `json:"finish_reason,omitempty"`
 	Memory    *memory.Block  `json:"memory,omitempty"`
 	Skills    *SkillReport   `json:"skills,omitempty"`
+	Steps     int            `json:"steps,omitempty"`
+	ToolRuns  []ToolRun      `json:"tool_runs,omitempty"`
+}
+
+// ToolRun is one executed tool call, reported so an agent can see what the
+// answer was actually built from.
+type ToolRun struct {
+	Step   int    `json:"step"`
+	Name   string `json:"name"`
+	Args   string `json:"args,omitempty"`
+	Chars  int    `json:"chars,omitempty"`
+	Failed string `json:"failed,omitempty"`
 }
 
 // SkillReport says which skills actually made it into the prompt. An answer
@@ -51,6 +65,13 @@ type ChatOptions struct {
 	// happen through the memory client, which is the only thing here allowed
 	// to touch the filesystem.
 	Skills *SkillOptions
+
+	// Tools, when set, lets the model ask for work between the question and
+	// the answer. MaxSteps bounds the loop: a model that keeps calling tools
+	// is a model spending money, and "it will stop eventually" is not a
+	// budget.
+	Tools    *Registry
+	MaxSteps int
 }
 
 // SkillOptions is the set of skills to load for this turn.
@@ -123,7 +144,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: skillText})
 	}
 	for _, m := range history {
-		msgs = append(msgs, provider.Message{Role: m.Role, Content: m.Content})
+		msgs = append(msgs, toProvider(m))
 	}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: opts.Message})
 
@@ -142,38 +163,181 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, err
 	}
 
-	resp, err := p.Chat(ctx, provider.Request{
-		Model:       opts.Assistant.Model,
-		Messages:    msgs,
-		Temperature: opts.Assistant.Temperature,
-		MaxTokens:   opts.Assistant.MaxTokens,
-	}, opts.OnDelta)
+	turn := &Turn{Thread: *th, User: userMsg, Memory: block, Skills: skills}
+	next := seq + 1
+	maxSteps := opts.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = 8
+	}
+	var specs []provider.Tool
+	if opts.Tools != nil {
+		specs = opts.Tools.Specs()
+	}
+
+	for step := 1; ; step++ {
+		resp, err := p.Chat(ctx, provider.Request{
+			Model:       opts.Assistant.Model,
+			Messages:    msgs,
+			Temperature: opts.Assistant.Temperature,
+			MaxTokens:   opts.Assistant.MaxTokens,
+			Tools:       specs,
+		}, opts.OnDelta)
+		if err != nil {
+			return nil, err
+		}
+		turn.Steps = step
+		model := resp.Model
+		if model == "" {
+			model = opts.Assistant.Model
+		}
+		turn.Model = model
+		// Usage accumulates across the loop. Reporting only the last call
+		// would understate a five-step turn by most of its cost.
+		turn.Usage.PromptTokens += resp.Usage.PromptTokens
+		turn.Usage.CompletionTokens += resp.Usage.CompletionTokens
+		turn.Usage.TotalTokens += resp.Usage.TotalTokens
+		turn.Finish = resp.FinishReason
+
+		// The assistant turn is stored whether it answered or asked for work,
+		// so a resumed thread replays the tool calls that a later tool result
+		// refers to. A provider rejects an orphaned tool result outright.
+		calls := ""
+		if len(resp.ToolCalls) > 0 {
+			b, err := json.Marshal(resp.ToolCalls)
+			if err != nil {
+				return nil, err
+			}
+			calls = string(b)
+		}
+		asstMsg, err := h.AppendMessage(Message{
+			ThreadID: th.ID, Role: provider.RoleAssistant, Content: resp.Content,
+			Model: model, Seq: next, ToolCalls: calls,
+			Prompt: resp.Usage.PromptTokens, Completed: resp.Usage.CompletionTokens,
+		})
+		if err != nil {
+			return nil, err
+		}
+		next++
+		if err := h.touch(th, next); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, provider.Message{
+			Role: provider.RoleAssistant, Content: resp.Content, ToolCalls: resp.ToolCalls,
+		})
+
+		if len(resp.ToolCalls) == 0 {
+			turn.Assistant = asstMsg
+			return turn, nil
+		}
+		if opts.Tools == nil {
+			// The model asked for a tool that was never offered. Stopping is
+			// the honest move: presenting this as an answer would hide that
+			// it is a request nobody answered.
+			return nil, fmt.Errorf("model requested tools but none are enabled")
+		}
+		if step >= maxSteps {
+			// The cap is a budget, so hitting it is reported rather than
+			// smoothed over: finish_reason says max_steps and the last
+			// assistant turn is whatever the model had produced.
+			turn.Assistant = asstMsg
+			turn.Finish = "max_steps"
+			return turn, nil
+		}
+
+		for _, call := range resp.ToolCalls {
+			result, run := h.runTool(ctx, opts.Tools, step, call)
+			turn.ToolRuns = append(turn.ToolRuns, run)
+			if _, err := h.AppendMessage(Message{
+				ThreadID: th.ID, Role: provider.RoleTool, Content: result,
+				Seq: next, ToolCallID: call.ID, Name: call.Name,
+			}); err != nil {
+				return nil, err
+			}
+			next++
+			msgs = append(msgs, provider.Message{
+				Role: provider.RoleTool, Content: result,
+				ToolCallID: call.ID, Name: call.Name,
+			})
+		}
+		if err := h.touch(th, next); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// runTool executes one call. A tool failure is returned to the model as the
+// tool's result rather than raised: the model asked a question, "that did not
+// work, here is why" is an answer it can act on, and killing the turn throws
+// away everything the earlier steps established.
+func (h *Hub) runTool(ctx context.Context, reg *Registry, step int, call provider.ToolCall) (string, ToolRun) {
+	run := ToolRun{Step: step, Name: call.Name, Args: call.Arguments}
+	t, ok := reg.get(call.Name)
+	if !ok {
+		// Naming the alternatives is what lets a model correct itself. Told
+		// only "no such tool", a real one invented the same wrong name three
+		// times and burned the whole step budget doing it.
+		run.Failed = "no such tool"
+		return fmt.Sprintf("Error: no tool named %q. Available tools: %s.",
+			call.Name, strings.Join(reg.Names(), ", ")), run
+	}
+	args := json.RawMessage(call.Arguments)
+	if len(args) == 0 {
+		args = json.RawMessage("{}")
+	}
+	if !json.Valid(args) {
+		run.Failed = "arguments were not valid JSON"
+		return "Error: your arguments were not valid JSON. Send a JSON object.", run
+	}
+	// Checked here rather than left to the tool, so the model is told which
+	// parameter it missed instead of receiving whatever error the tool
+	// happens to produce when handed an empty string.
+	if missing := missingArgs(t, args); missing != "" {
+		run.Failed = "missing required parameter " + missing
+		return fmt.Sprintf("Error: tool %q requires the parameter %q. Send it and try again.",
+			call.Name, missing), run
+	}
+	result, err := t.Run(ctx, args)
 	if err != nil {
-		return nil, err
+		run.Failed = err.Error()
+		return "Error: " + err.Error(), run
 	}
+	run.Chars = len(result)
+	return result, run
+}
 
-	model := resp.Model
-	if model == "" {
-		model = opts.Assistant.Model
+// missingArgs reports the first required parameter the model left out.
+func missingArgs(t Tool, args json.RawMessage) string {
+	var got map[string]any
+	if err := json.Unmarshal(args, &got); err != nil {
+		return ""
 	}
-	asstMsg, err := h.AppendMessage(Message{
-		ThreadID: th.ID, Role: provider.RoleAssistant, Content: resp.Content,
-		Model: model, Seq: seq + 1,
-		Prompt: resp.Usage.PromptTokens, Completed: resp.Usage.CompletionTokens,
-	})
-	if err != nil {
-		return nil, err
+	for _, name := range t.Required() {
+		v, present := got[name]
+		if !present {
+			return name
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			return name
+		}
 	}
+	return ""
+}
 
-	if err := h.touch(th, seq+2); err != nil {
-		return nil, err
+// toProvider rebuilds a stored message for replay, including the tool call
+// linkage. A dropped tool_calls array makes the next tool result an orphan
+// and the whole conversation unreplayable.
+func toProvider(m Message) provider.Message {
+	out := provider.Message{
+		Role: m.Role, Content: m.Content,
+		ToolCallID: m.ToolCallID, Name: m.Name,
 	}
-
-	return &Turn{
-		Thread: *th, User: userMsg, Assistant: asstMsg,
-		Model: model, Usage: resp.Usage, Finish: resp.FinishReason,
-		Memory: block, Skills: skills,
-	}, nil
+	if m.ToolCalls != "" {
+		var calls []provider.ToolCall
+		if err := json.Unmarshal([]byte(m.ToolCalls), &calls); err == nil {
+			out.ToolCalls = calls
+		}
+	}
+	return out
 }
 
 // loadSkills resolves each named skill through memgraph and reads its file.

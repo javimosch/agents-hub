@@ -5,10 +5,12 @@ It echoes back what it was told, so an assertion can prove the whole prompt --
 system message, replayed history, new turn -- actually reached the model. A
 mock that returned a constant would pass even if history replay were broken.
 """
-import json, sys
+import json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-MODE = {"fail": False}
+# Set through /control/*, not the environment: the server is started once and
+# the suite has to be able to change its behaviour per assertion.
+MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}'}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -27,10 +29,45 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/control/fail":
             MODE["fail"] = bool(req.get("fail"))
             return self._json(200, {"fail": MODE["fail"]})
+        if self.path == "/control/tool":
+            MODE["tool"] = req.get("tool")
+            MODE["args"] = req.get("args", '{"query":"ports"}')
+            return self._json(200, {"tool": MODE["tool"], "args": MODE["args"]})
         if not self.path.endswith("/chat/completions"):
             return self._json(404, {"error": {"message": "no route"}})
         if MODE["fail"]:
             return self._json(500, {"error": {"message": "model on fire"}})
+
+        # Tool loop: when tools are offered and no result has come back yet,
+        # ask for one. On the next pass the tool turns are in the history, so
+        # answer for real. This is the shape a real model produces, which is
+        # what makes the assertions about replay meaningful.
+        tools = req.get("tools") or []
+        msgs_in = req.get("messages", [])
+        results = [m for m in msgs_in if m.get("role") == "tool"]
+        if tools and not results:
+            want = MODE["tool"] or tools[0]["function"]["name"]
+            args = MODE["args"]
+            call = {"id": "call_1", "type": "function",
+                    "function": {"name": want, "arguments": args}}
+            usage = {"prompt_tokens": len(msgs_in), "completion_tokens": 3,
+                     "total_tokens": len(msgs_in) + 3}
+            if req.get("stream"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                frag = dict(call); frag["index"] = 0
+                self.wfile.write(b"data: " + json.dumps(
+                    {"choices": [{"delta": {"tool_calls": [frag]}}]}).encode() + b"\n\n")
+                self.wfile.write(b"data: " + json.dumps(
+                    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+                     "usage": usage}).encode() + b"\n\n")
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+            return self._json(200, {"model": req.get("model"), "usage": usage,
+                "choices": [{"message": {"content": "", "tool_calls": [call]},
+                             "finish_reason": "tool_calls"}]})
 
         msgs = req.get("messages", [])
         roles = ",".join(m["role"] for m in msgs)
@@ -41,7 +78,9 @@ class H(BaseHTTPRequestHandler):
                       for m in msgs if m["role"] == "system"))
         skl = int(any("## Skills" in m.get("content", "")
                       for m in msgs if m["role"] == "system"))
-        text = f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} echo={last}"
+        tool_out = " | ".join(m.get("content", "")[:40] for m in msgs if m["role"] == "tool")
+        text = (f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} "
+                f"tools={len(req.get('tools') or [])} toolout={tool_out} echo={last}")
         usage = {"prompt_tokens": len(msgs), "completion_tokens": 7, "total_tokens": len(msgs) + 7}
 
         if req.get("stream"):

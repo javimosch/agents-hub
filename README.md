@@ -95,6 +95,39 @@ Both degrade rather than block: if memgraph is missing or fails, the turn still
 answers and says so in `memory.error` / `skills.skipped`. `--memory-required`
 and `--skills-required` make them fatal.
 
+## Tools: the loop
+
+An assistant can be given tools, and a turn becomes a loop — the model asks,
+the result comes back, it answers:
+
+```sh
+ahub tool list                      # needs no token, no backend, no memgraph
+ahub chat --assistant agent --tools memory_recall,skill_show \
+  --message "why does a long-running daemon loop leak in machin?"
+# {"content":"...arena { }...","steps":2,"tool_runs":[{"name":"memory_recall","chars":4979}]}
+```
+
+| Tool | Writes |
+|---|---|
+| `memory_recall` — search past notes | no |
+| `skill_search` — find procedures by topic | no |
+| `skill_show` — read one procedure in full | no |
+| `memory_save` — record a durable note | **yes** |
+
+Every tool is memgraph-backed, which is deliberate: the first tools an
+assistant gets are the ones that let it *look things up*, not the ones that
+let it act. There is no shell tool, and that is not an oversight.
+
+Writes are gated twice — naming a tool enables it, and a tool that changes
+state needs `--allow-writes` as well. "Give it tools" and "let it change
+things" are different decisions; one flag would collapse them into one.
+
+The loop is bounded by `--max-steps` (default 8), and usage is summed across
+every step. Running out of steps without an answer is **exit 105**, not a
+successful empty string — the thread is stored, so the error tells you how to
+resume it. A tool failure goes back to the model as that tool's result rather
+than killing the turn, and stays visible in `tool_runs[].failed`.
+
 ## Output contract
 
 stdout is data, stderr is context, and the exit code says what to do next:
@@ -120,12 +153,13 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-99 assertions against a throwaway bkn, a real HTTP provider that echoes its
+129 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
 assertion that a message full of shell metacharacters arrives at memgraph
-verbatim and touches nothing.
+verbatim and touches nothing. The fake model drives a real two-pass tool loop,
+so replaying a thread that contains tool turns is tested rather than hoped for.
 
 ## Spec conformance
 
@@ -138,10 +172,10 @@ verbatim and touches nothing.
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
 
-## What v0.2 is not
+## What v0.3 is not
 
-One turn per invocation. No tool calling, no MCP gateway, no sub-agents, no
-HITL, no workflows, no scheduling. Those are the substance of
+No MCP gateway, no sub-agents, no HITL, no workflows, no scheduling. Those are
+the remaining substance of
 `the internal project`'s agentic engine and they are not here yet — this is the
 spine they attach to.
 

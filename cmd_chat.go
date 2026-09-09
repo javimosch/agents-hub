@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -73,6 +74,8 @@ func chatCmd(fl *flags) {
 		HistoryLimit: fl.intVal("history", 100),
 		Memory:       memoryFor(fl, a),
 		Skills:       skillsFor(fl, a),
+		Tools:        toolsFor(fl, a),
+		MaxSteps:     fl.intVal("max-steps", 0),
 	}
 	if fl.stream {
 		// Deltas are NDJSON on stdout, not bare text: stdout stays parseable,
@@ -90,6 +93,10 @@ func chatCmd(fl *flags) {
 		if bkn.FromBackend(err) {
 			fail(err, "chat")
 		}
+		if strings.HasPrefix(err.Error(), "model requested tools") {
+			out.Fail(out.ValidationError, "tools_disabled", err.Error(),
+				"enable tools with --tools memory_recall,skill_show")
+		}
 		if strings.HasPrefix(err.Error(), "skill ") {
 			out.Fail(out.NotFound, "skill_error", err.Error(),
 				`ahub skill search "..."`, "or drop --skills-required")
@@ -102,6 +109,18 @@ func chatCmd(fl *flags) {
 		// Anything else at this point came from the model provider.
 		out.Fail(out.ExternalError, "provider_error", err.Error(),
 			"retry, or try --model with a different model")
+	}
+
+	// A turn that ran out of steps without producing text is not a successful
+	// answer, and reporting it as one is the worst outcome available: an
+	// agent gets ok:true and an empty string, and carries on. The thread is
+	// stored and resumable, so the error says how to continue it.
+	if turn.Finish == "max_steps" && strings.TrimSpace(turn.Assistant.Content) == "" {
+		out.Fail(out.ExternalError, "max_steps_exhausted",
+			fmt.Sprintf("the model was still calling tools after %d steps and never answered",
+				turn.Steps),
+			"ahub chat --thread "+turn.Thread.ID+" --max-steps 20 --message <same message>",
+			"or narrow the question, or drop a tool it keeps misusing")
 	}
 
 	fields := map[string]any{
@@ -123,10 +142,50 @@ func chatCmd(fl *flags) {
 	if turn.Skills != nil {
 		fields["skills"] = turn.Skills
 	}
+	// Always reported, even when it is 1. A turn that stopped at its step
+	// cap has one step and a finish reason of max_steps, and omitting the
+	// count there would hide the budget exactly where it was hit.
+	fields["steps"] = turn.Steps
+	if len(turn.ToolRuns) > 0 {
+		fields["tool_runs"] = turn.ToolRuns
+	}
 	out.Data(fields)
 	if fl.human {
 		out.Log("--- %s (%s) thread %s", a.Name, turn.Model, turn.Thread.ID)
 	}
+}
+
+// toolsFor builds the registry for this turn.
+//
+// Tools are opt-in twice over: named here or on the assistant, and -- for
+// anything that writes -- allowed again with --allow-writes. The second gate
+// exists because "give it tools" and "let it change things" are different
+// decisions that a single flag would collapse into one.
+func toolsFor(fl *flags, a hub.Assistant) *hub.Registry {
+	if fl.has("no-tools") {
+		return nil
+	}
+	names := splitList(fl.str("tools"))
+	if len(names) == 0 {
+		names = a.Tools
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	c, err := memory.New(0)
+	if err != nil {
+		out.Fail(out.NotFound, "memgraph_missing", err.Error(),
+			"every tool in this build is backed by memgraph; install it or pass --no-tools")
+	}
+	project := fl.str("memory-project")
+	if project == "" {
+		project = a.MemoryProject
+	}
+	reg, err := hub.NewRegistry(names, c, project, fl.has("allow-writes"))
+	if err != nil {
+		out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
+	}
+	return reg
 }
 
 // memoryFor decides whether this turn recalls anything.
