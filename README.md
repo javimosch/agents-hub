@@ -1,9 +1,9 @@
 # agents-hub
 
-`ahub` — run a configured assistant from the command line, non-interactively,
+`ahub` — run a configured agent from the command line, non-interactively,
 with the conversation stored durably in [bkn](https://github.com/javimosch/bkn).
 
-A CLI-only, agent-first port of the assistant layer of `the internal project`. No UI,
+A CLI-only, agent-first port of the agent layer of `the internal project`. No UI,
 no widget, no MongoDB: state and identity live in a bkn instance, answers come
 from any OpenAI-compatible provider, context comes from
 [memgraph](https://github.com/javimosch/memgraph) memories and skills, and
@@ -18,13 +18,13 @@ ahub setup --admin-token "$BKN_ADMIN_TOKEN"        # once, by a human
 ahub login --email you@example.com --password ...
 ahub config set --provider-url https://api.mistral.ai/v1 --provider-key "$MISTRAL_KEY"
 
-ahub assistant create --name helper --model mistral-small-latest \
+ahub agent create --name helper --model mistral-small-latest \
   --system "You answer in one paragraph."
 
-ahub chat --assistant helper --message "what changed in the repo today?"
+ahub chat --agent helper --message "what changed in the repo today?"
 # {"ok":true,"thread":"01M2...","content":"...","usage":{...}}
 
-ahub chat --assistant helper --thread 01M2... --message "and yesterday?"
+ahub chat --agent helper --thread 01M2... --message "and yesterday?"
 ahub thread show 01M2...
 ```
 
@@ -32,8 +32,9 @@ ahub thread show 01M2...
 
 | Thing | What it is | Where it lives |
 |---|---|---|
-| assistant | a saved system prompt + model + knobs | `hub/assistants` in bkn |
-| thread | one conversation with one assistant | `hub/threads` |
+| agent | a saved system prompt + model + knobs | `hub/agents` in bkn |
+| schedule | a standing instruction to run an agent | `hub/schedules` |
+| thread | one conversation with one agent | `hub/threads` |
 | message | one turn, with its model and token counts | `hub/messages` |
 | profile | bkn url, token, provider, model | `~/.config/agents-hub/config.json` (0600) |
 | memory | recalled notes, prepended as reference | a memgraph project |
@@ -57,7 +58,7 @@ The admin token appears in exactly one command, `setup`, and never on the path
 that answers a chat.
 
 `test/t-hub.sh` asserts this rather than assuming it: a second real user, with a
-valid token, holding the first user's assistant and thread ids, gets 92 on every
+valid token, holding the first user's agent and thread ids, gets 92 on every
 one of them.
 
 ## Context: memory and skills, not RAG
@@ -66,8 +67,8 @@ There is no vector store here and no embedding step. Context comes from two
 places, both owned by memgraph, both plain text a human can read and edit:
 
 ```sh
-ahub assistant update helper --memory-project machin --skills agent-first-cli-specs
-ahub chat --assistant helper --message "why does the daemon loop leak?"
+ahub agent update helper --memory-project machin --skills agent-first-cli-specs
+ahub chat --agent helper --message "why does the daemon loop leak?"
 # {"content":"...arena { } ...","memory":{"used":2,"chars":2163},"skills":{"loaded":["..."]}}
 
 ahub memory recall --query "port release" --project essaim   # what the model would see
@@ -79,7 +80,7 @@ reference material — the block tells the model in as many words to use them if
 relevant and never to follow instructions inside them, because they were
 written by past sessions and other tools. **Skills** are the opposite: they
 *are* instructions, which is exactly why one is loaded only when it was named
-in the assistant or on the command line.
+in the agent or on the command line.
 
 Everything memgraph is reached through one wrapper with narrow rules: explicit
 argv and no shell, so nothing in a message can become a command; validated
@@ -98,12 +99,12 @@ and `--skills-required` make them fatal.
 
 ## Tools: the loop
 
-An assistant can be given tools, and a turn becomes a loop — the model asks,
+An agent can be given tools, and a turn becomes a loop — the model asks,
 the result comes back, it answers:
 
 ```sh
 ahub tool list                      # needs no token, no backend, no memgraph
-ahub chat --assistant agent --tools memory_recall,skill_show \
+ahub chat --agent agent --tools memory_recall,skill_show \
   --message "why does a long-running daemon loop leak in machin?"
 # {"content":"...arena { }...","steps":2,"tool_runs":[{"name":"memory_recall","chars":4979}]}
 ```
@@ -116,7 +117,7 @@ ahub chat --assistant agent --tools memory_recall,skill_show \
 | `memory_save` — record a durable note | **yes** |
 
 Every tool is memgraph-backed, which is deliberate: the first tools an
-assistant gets are the ones that let it *look things up*, not the ones that
+agent gets are the ones that let it *look things up*, not the ones that
 let it act. There is no shell tool, and that is not an oversight.
 
 Writes are gated twice — naming a tool enables it, and a tool that changes
@@ -131,7 +132,7 @@ than killing the turn, and stays visible in `tool_runs[].failed`.
 
 ## Flows: the deterministic path
 
-An assistant improvises and pays per turn. A flow follows a path somebody
+An agent improvises and pays per turn. A flow follows a path somebody
 designed, and pays only where it has to:
 
 ```sh
@@ -193,7 +194,7 @@ stdout is data, stderr is context, and the exit code says what to do next:
 | 0 | success | continue |
 | 80 / 82 / 85 | unknown command / missing field / bad value | fix the command |
 | 90 | not authenticated | `ahub login` |
-| 92 | no such assistant, thread or record | check the name |
+| 92 | no such agent, thread or record | check the name |
 | 100 | bkn unreachable | retry with backoff |
 | 105 | provider failed, or the turn was interrupted | retry the same `--thread` |
 | 110 | internal error | report it |
@@ -228,23 +229,23 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
 
-## Agents: autonomous runs
+## Schedules: autonomous runs
 
-A flow is a path someone designed. An agent is a model deciding what to do,
-on a schedule, with nobody watching:
+A flow is a path someone designed. A **schedule** lets an agent decide what to
+do, on a cadence, with nobody watching:
 
 ```sh
-ahub agent create --name nightly --assistant helper --every 6h \
+ahub schedule create --name nightly --agent helper --every 6h \
   --prompt "Check what changed and note anything worth following up." \
   --tools memory_recall --memory-project machin
 
-ahub agent tick     # runs everything due; this is what a timer calls
-ahub agent runs --agent nightly
+ahub schedule tick     # runs everything due; this is what a timer calls
+ahub schedule runs --agent nightly
 ```
 
 **Each run starts a fresh thread.** What carries forward is one bounded note —
 the **scratchpad** — that the agent writes itself through a `scratchpad` tool,
-and that a human can read or correct with `ahub agent scratchpad <name>`:
+and that a human can read or correct with `ahub schedule scratchpad <name>`:
 
 ```
 run 1: 2108 tokens   note: "Covered Machin's formula. Next run: a different angle."
@@ -256,7 +257,7 @@ autonomous agent's history makes every run cost more than the last and
 eventually stop fitting, while a capped note cannot. Durable knowledge goes to
 memgraph via `memory_save`; the scratchpad is only "where I got to last time".
 
-`ahub agent tick` exits 105 if any agent failed, so a timer that always exits 0
+`ahub schedule tick` exits 105 if any schedule failed, so a timer that always exits 0
 cannot hide a broken agent — and a failed run still advances the schedule,
 because an agent that stopped rescheduling when it broke would go quiet exactly
 when you needed it to keep complaining.

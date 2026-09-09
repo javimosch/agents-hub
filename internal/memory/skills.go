@@ -140,7 +140,7 @@ func LoadSkill(s Skill) (string, error) {
 // Skills are instructions on purpose -- that is what a skill is -- so unlike
 // the memory block this one is not framed as inert reference material. The
 // safety property is upstream: a skill is loaded only when it was named in
-// the assistant's configuration or on the command line.
+// the agent's configuration or on the command line.
 func SkillBlock(loaded map[string]string, order []string) string {
 	if len(loaded) == 0 {
 		return ""

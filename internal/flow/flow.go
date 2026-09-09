@@ -3,7 +3,7 @@
 // A flow is a path expressed as data: steps, a start, and where each step
 // goes next. Most steps cost nothing to run -- collecting a value, branching
 // on it, running a CLI -- and exactly one step type calls a model. That is
-// the whole point. An assistant asked to conduct a five-question intake pays
+// the whole point. An agent asked to conduct a five-question intake pays
 // for five model turns and may still improvise its way off the script; the
 // same intake as a flow costs zero tokens and cannot.
 //
@@ -93,7 +93,7 @@ type Step struct {
 	OnError string `json:"on_error,omitempty"`
 
 	// ask
-	Assistant string `json:"assistant,omitempty"`
+	Agent string `json:"agent,omitempty"`
 
 	// script names a bkn script to run. It carries the caller's own token, so
 	// the script runs as the user and bkn's per-script run policy decides
@@ -322,8 +322,8 @@ func validateStep(name string, s Step, add func(string, string, bool), allowedCm
 			add(name, "select needs parse: json", true)
 		}
 	case TypeAsk:
-		if s.Assistant == "" {
-			add(name, "ask needs an assistant", true)
+		if s.Agent == "" {
+			add(name, "ask needs an agent", true)
 		}
 		if s.Prompt == "" {
 			add(name, "ask needs a prompt", true)

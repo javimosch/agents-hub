@@ -1,185 +1,114 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/javimosch/agents-hub/internal/bkn"
 )
 
-// Agent collections.
-const (
-	RefAgents    = NS + "/agents"
-	RefAgentRuns = NS + "/agent_runs"
-)
+// ErrAmbiguous is returned when a name matches more than one agent.
+var ErrAmbiguous = errors.New("name matches more than one agent")
 
-// Agent is a standing instruction: run this assistant, on this schedule, with
-// no user in the loop.
-//
-// The interesting field is Scratchpad. An autonomous agent that replayed its
-// whole conversation history would get more expensive every run and, once the
-// window filled, quietly less coherent. Instead each run starts a fresh
-// thread and carries forward one bounded note that the agent itself writes.
-// Knowledge that deserves to outlive the agent goes to memgraph through the
-// memory_save tool; the scratchpad is only "where I got to last time".
+// Agent is a saved configuration: the prompt, the model, and the knobs.
 type Agent struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Assistant string `json:"assistant"`
-	Prompt    string `json:"prompt"`
-
-	// Schedule. EverySecs and At are the whole vocabulary: anything more
-	// elaborate is a systemd timer calling `ahub agent run <name>`, which is
-	// a scheduler that already exists and that nobody has to debug here.
-	EverySecs int    `json:"every_secs,omitempty"`
-	At        string `json:"at,omitempty"` // HH:MM, daily
-	Enabled   bool   `json:"enabled"`
-
-	Tools         []string `json:"tools,omitempty"`
-	Skills        []string `json:"skills,omitempty"`
-	MemoryProject string   `json:"memory_project,omitempty"`
-	MaxSteps      int      `json:"max_steps,omitempty"`
-	TimeoutSecs   int      `json:"timeout_secs,omitempty"`
-
-	Scratchpad   string `json:"scratchpad,omitempty"`
-	ScratchpadAt string `json:"scratchpad_at,omitempty"`
-
-	LastRunAt  string `json:"last_run_at,omitempty"`
-	LastStatus string `json:"last_status,omitempty"`
-	NextRunAt  string `json:"next_run_at,omitempty"`
-	Runs       int    `json:"runs"`
-
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Model       string   `json:"model"`
+	System      string   `json:"system,omitempty"`
+	Provider    string   `json:"provider,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	MaxTokens   int      `json:"max_tokens,omitempty"`
+	// MemoryProject names a memgraph scope to recall from before each turn.
+	// Empty means the agent has no memory, which stays the default: an
+	// agent that silently reads a knowledge store is one whose answers
+	// cannot be reproduced from its own configuration.
+	MemoryProject string `json:"memory_project,omitempty"`
+	// Skills names procedures to load before each turn, resolved through
+	// memgraph's skill graph. Unlike memories, a skill is instruction: it is
+	// loaded only because someone named it here or on the command line.
+	Skills []string `json:"skills,omitempty"`
+	// Tools names what this agent may ask to have run. Empty means it
+	// answers from what it was given, which stays the default: a tool loop
+	// costs money and reaches outside the conversation.
+	Tools     []string `json:"tools,omitempty"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
 }
-
-// MaxScratchpad bounds what one run may carry to the next. The whole point of
-// a scratchpad over history is that it cannot grow without limit; a cap that
-// is never enforced is a cap that does not exist.
-const MaxScratchpad = 4000
 
 func agentFrom(r bkn.Record) Agent {
 	a := Agent{
-		ID: r.Str("id"), Name: r.Str("name"), Assistant: r.Str("assistant"),
-		Prompt: r.Str("prompt"), At: r.Str("at"),
-		EverySecs:     int(r.Num("every_secs")),
-		Enabled:       r["enabled"] != false,
+		ID:            r.Str("id"),
+		Name:          r.Str("name"),
+		Model:         r.Str("model"),
+		System:        r.Str("system"),
+		Provider:      r.Str("provider"),
 		MemoryProject: r.Str("memory_project"),
-		MaxSteps:      int(r.Num("max_steps")),
-		TimeoutSecs:   int(r.Num("timeout_secs")),
-		Scratchpad:    r.Str("scratchpad"), ScratchpadAt: r.Str("scratchpad_at"),
-		LastRunAt: r.Str("last_run_at"), LastStatus: r.Str("last_status"),
-		NextRunAt: r.Str("next_run_at"), Runs: int(r.Num("runs")),
-		CreatedAt: r.Str("created_at"), UpdatedAt: r.Str("updated_at"),
+		CreatedAt:     r.Str("created_at"),
+		UpdatedAt:     r.Str("updated_at"),
+		MaxTokens:     int(r.Num("max_tokens")),
 	}
-	a.Tools = append(a.Tools, asList(r["tools"])...)
+	if v, ok := r["temperature"].(float64); ok {
+		a.Temperature = &v
+	}
 	a.Skills = append(a.Skills, asList(r["skills"])...)
+	a.Tools = append(a.Tools, asList(r["tools"])...)
 	return a
 }
 
-// NextRun computes when an agent should run after a given moment.
-//
-// It is computed forward from now rather than from the previous due time, so
-// a machine that was off for a week runs once when it comes back instead of
-// trying to catch up on every missed slot at once.
-func (a Agent) NextRun(from time.Time) (time.Time, error) {
-	switch {
-	case a.EverySecs > 0:
-		return from.Add(time.Duration(a.EverySecs) * time.Second), nil
-	case a.At != "":
-		hh, mm, err := parseAt(a.At)
-		if err != nil {
-			return time.Time{}, err
-		}
-		next := time.Date(from.Year(), from.Month(), from.Day(), hh, mm, 0, 0, from.Location())
-		if !next.After(from) {
-			next = next.Add(24 * time.Hour)
-		}
-		return next, nil
-	}
-	// No schedule: the agent only ever runs when asked. That is a legitimate
-	// configuration -- a webhook or a human is the trigger -- so it is not an
-	// error, it simply never becomes due.
-	return time.Time{}, nil
-}
-
-// ValidateAt lets the CLI reject a malformed time of day as an invalid value
-// (85) before the domain reports it as a validation error (82). Both layers
-// check: the CLI so the exit code matches every other bad flag value, the
-// domain so a caller that bypasses the CLI cannot store an unschedulable
-// agent.
-func ValidateAt(s string) error {
-	if s == "" {
+// asList reads a JSON array of strings back out of a stored document.
+func asList(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
 		return nil
 	}
-	_, _, err := parseAt(s)
-	return err
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
-func parseAt(s string) (int, int, error) {
-	var hh, mm int
-	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d:%d", &hh, &mm); err != nil {
-		return 0, 0, fmt.Errorf("--at takes HH:MM, got %q", s)
-	}
-	if hh < 0 || hh > 23 || mm < 0 || mm > 59 {
-		return 0, 0, fmt.Errorf("--at %q is not a valid time of day", s)
-	}
-	return hh, mm, nil
-}
-
-// CreateAgent stores a new schedule and computes its first due time.
+// CreateAgent saves a new agent. Name and model are required: an
+// agent without a model is a config that fails at the only moment it is
+// ever used.
 func (h *Hub) CreateAgent(a Agent) (Agent, error) {
 	if strings.TrimSpace(a.Name) == "" {
 		return Agent{}, fmt.Errorf("name is required")
 	}
-	if strings.TrimSpace(a.Assistant) == "" {
-		return Agent{}, fmt.Errorf("assistant is required")
-	}
-	if strings.TrimSpace(a.Prompt) == "" {
-		return Agent{}, fmt.Errorf("prompt is required: an agent with nothing to do is a schedule that burns tokens")
-	}
-	if a.EverySecs > 0 && a.At != "" {
-		return Agent{}, fmt.Errorf("give --every or --at, not both")
-	}
-	next, err := a.NextRun(time.Now().UTC())
-	if err != nil {
-		return Agent{}, err
+	if strings.TrimSpace(a.Model) == "" {
+		return Agent{}, fmt.Errorf("model is required")
 	}
 	doc := map[string]any{
-		"name": a.Name, "assistant": a.Assistant, "prompt": a.Prompt,
-		"enabled": true, "runs": 0,
-		"created_at": now(), "updated_at": now(),
+		"name":       a.Name,
+		"model":      a.Model,
+		"created_at": now(),
+		"updated_at": now(),
 	}
-	if a.EverySecs > 0 {
-		doc["every_secs"] = a.EverySecs
+	if a.System != "" {
+		doc["system"] = a.System
 	}
-	if a.At != "" {
-		doc["at"] = a.At
+	if a.Provider != "" {
+		doc["provider"] = a.Provider
 	}
-	if !next.IsZero() {
-		doc["next_run_at"] = next.Format(time.RFC3339)
+	if a.MemoryProject != "" {
+		doc["memory_project"] = a.MemoryProject
 	}
-	for k, v := range map[string]any{
-		"tools": a.Tools, "skills": a.Skills,
-		"memory_project": a.MemoryProject, "max_steps": a.MaxSteps,
-		"timeout_secs": a.TimeoutSecs,
-	} {
-		switch t := v.(type) {
-		case []string:
-			if len(t) > 0 {
-				doc[k] = t
-			}
-		case string:
-			if t != "" {
-				doc[k] = t
-			}
-		case int:
-			if t > 0 {
-				doc[k] = t
-			}
-		}
+	if len(a.Skills) > 0 {
+		doc["skills"] = a.Skills
+	}
+	if len(a.Tools) > 0 {
+		doc["tools"] = a.Tools
+	}
+	if a.Temperature != nil {
+		doc["temperature"] = *a.Temperature
+	}
+	if a.MaxTokens > 0 {
+		doc["max_tokens"] = a.MaxTokens
 	}
 	rec, err := h.C.Create(RefAgents, doc)
 	if err != nil {
@@ -188,33 +117,10 @@ func (h *Hub) CreateAgent(a Agent) (Agent, error) {
 	return agentFrom(rec), nil
 }
 
-// FindAgent resolves by id then by name.
-func (h *Hub) FindAgent(ref string) (Agent, error) {
-	if ref == "" {
-		return Agent{}, fmt.Errorf("name an agent")
-	}
-	if rec, err := h.C.Get(RefAgents, ref); err == nil {
-		return agentFrom(rec), nil
-	} else if !bkn.NotFound(err) {
-		return Agent{}, err
-	}
-	q := url.Values{}
-	q.Set("name", ref)
-	recs, err := h.C.List(RefAgents, q)
-	if err != nil {
-		return Agent{}, err
-	}
-	if len(recs) == 0 {
-		return Agent{}, &bkn.APIError{Status: 404, Type: "not_found", Message: "no agent named " + ref}
-	}
-	return agentFrom(recs[0]), nil
-}
-
-// ListAgents returns the caller's agents.
+// ListAgents returns the caller's agents, newest first.
 func (h *Hub) ListAgents(limit int) ([]Agent, error) {
 	q := url.Values{}
-	q.Set("order_by", "name")
-	q.Set("order", "asc")
+	q.Set("order_by", "created_at")
 	if limit > 0 {
 		q.Set("limit", fmt.Sprint(limit))
 	}
@@ -229,27 +135,36 @@ func (h *Hub) ListAgents(limit int) ([]Agent, error) {
 	return out, nil
 }
 
-// DueAgents returns the enabled agents whose next run has arrived.
-func (h *Hub) DueAgents(at time.Time) ([]Agent, error) {
-	all, err := h.ListAgents(0)
+// ResolveAgent finds an agent by id, then by exact name. Agents refer
+// to agents by name; ids are what they store afterwards. An ambiguous
+// name is an error rather than a silent first-match, because picking one
+// quietly is how the wrong system prompt ends up in production.
+func (h *Hub) ResolveAgent(ref string) (Agent, error) {
+	if ref == "" {
+		return Agent{}, fmt.Errorf("agent is required")
+	}
+	if rec, err := h.C.Get(RefAgents, ref); err == nil {
+		return agentFrom(rec), nil
+	} else if !bkn.NotFound(err) {
+		return Agent{}, err
+	}
+	q := url.Values{}
+	q.Set("name", ref)
+	recs, err := h.C.List(RefAgents, q)
 	if err != nil {
-		return nil, err
+		return Agent{}, err
 	}
-	due := []Agent{}
-	for _, a := range all {
-		if !a.Enabled || a.NextRunAt == "" {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, a.NextRunAt)
-		if err != nil || t.After(at) {
-			continue
-		}
-		due = append(due, a)
+	switch len(recs) {
+	case 0:
+		return Agent{}, fmt.Errorf("no agent named %q", ref)
+	case 1:
+		return agentFrom(recs[0]), nil
+	default:
+		return Agent{}, fmt.Errorf("%w: %q matches %d", ErrAmbiguous, ref, len(recs))
 	}
-	return due, nil
 }
 
-// UpdateAgent merges fields into an agent.
+// UpdateAgent merges the given fields into an existing agent.
 func (h *Hub) UpdateAgent(id string, fields map[string]any) (Agent, error) {
 	if len(fields) == 0 {
 		return Agent{}, fmt.Errorf("give at least one field to change")
@@ -262,6 +177,9 @@ func (h *Hub) UpdateAgent(id string, fields map[string]any) (Agent, error) {
 	return agentFrom(rec), nil
 }
 
-// DeleteAgent removes a schedule. Its run history is left alone: what an
-// agent did is a fact, and deleting the schedule does not un-run it.
-func (h *Hub) DeleteAgent(id string) error { return h.C.Delete(RefAgents, id) }
+// DeleteAgent removes an agent. Threads that referenced it are left
+// alone: a conversation that happened is a fact, and deleting the config that
+// produced it does not un-happen it.
+func (h *Hub) DeleteAgent(id string) error {
+	return h.C.Delete(RefAgents, id)
+}

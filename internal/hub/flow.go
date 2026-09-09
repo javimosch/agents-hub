@@ -216,17 +216,17 @@ func (h *Hub) Scripter() flow.Scripter {
 	}
 }
 
-// Asker wires a flow's ask step to a real assistant and thread, so an LLM
+// Asker wires a flow's ask step to a real agent and thread, so an LLM
 // turn inside a flow is stored, auditable and resumable exactly like a chat.
 // A flow that talks to a model leaves the same trail as a person who did.
 func (h *Hub) Asker(p provider.Provider, defaults ChatOptions) flow.Asker {
-	return func(ctx context.Context, assistant, prompt, thread string) (string, string, int, error) {
-		a, err := h.ResolveAssistant(assistant)
+	return func(ctx context.Context, agent, prompt, thread string) (string, string, int, error) {
+		a, err := h.ResolveAgent(agent)
 		if err != nil {
 			return "", thread, 0, err
 		}
 		opts := defaults
-		opts.Assistant = a
+		opts.Agent = a
 		opts.Message = prompt
 		opts.Thread = nil
 		if thread != "" {
@@ -240,6 +240,6 @@ func (h *Hub) Asker(p provider.Provider, defaults ChatOptions) flow.Asker {
 		if err != nil {
 			return "", thread, 0, err
 		}
-		return turn.Assistant.Content, turn.Thread.ID, turn.Usage.TotalTokens, nil
+		return turn.Reply.Content, turn.Thread.ID, turn.Usage.TotalTokens, nil
 	}
 }

@@ -1,4 +1,4 @@
-// Package hub is the domain: assistants, threads, messages, and the chat turn
+// Package hub is the domain: agents, threads, messages, and the chat turn
 // that ties them together. Everything it persists lives in bkn collections.
 package hub
 
@@ -11,7 +11,7 @@ import (
 // Collection refs. One namespace, three collections -- the whole data model.
 const (
 	NS             = "hub"
-	RefAssistants  = NS + "/assistants"
+	RefAgents      = NS + "/agents"
 	RefThreads     = NS + "/threads"
 	RefMessages    = NS + "/messages"
 	OwnerFieldName = "user_id"
@@ -19,8 +19,8 @@ const (
 
 // Refs lists every collection the hub owns, in declare order.
 func Refs() []string {
-	return []string{RefAssistants, RefThreads, RefMessages, RefFlows, RefFlowRuns,
-		RefAgents, RefAgentRuns}
+	return []string{RefAgents, RefThreads, RefMessages, RefFlows, RefFlowRuns,
+		RefSchedules, RefScheduleRuns}
 }
 
 // Hub is the domain bound to one bkn client (and therefore one identity).

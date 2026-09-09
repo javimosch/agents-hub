@@ -26,11 +26,11 @@ func chatCmd(fl *flags) {
 	if strings.TrimSpace(msg) == "" {
 		out.Fail(out.ValidationError, "validation_error",
 			"--message is required",
-			`ahub chat --assistant helper --message "what changed today?"`)
+			`ahub chat --agent helper --message "what changed today?"`)
 	}
 
-	a := resolveAssistant(h, fl.str("assistant"))
-	// A per-call --model overrides the assistant's, so an agent can try a
+	a := resolveAgent(h, fl.str("agent"))
+	// A per-call --model overrides the agent's, so an agent can try a
 	// bigger model on a hard turn without editing (and then having to undo)
 	// the saved configuration.
 	if fl.model != "" {
@@ -68,7 +68,7 @@ func chatCmd(fl *flags) {
 	defer stop()
 
 	opts := hub.ChatOptions{
-		Assistant:    a,
+		Agent:        a,
 		Thread:       th,
 		Message:      msg,
 		HistoryLimit: fl.intVal("history", 100),
@@ -115,7 +115,7 @@ func chatCmd(fl *flags) {
 	// answer, and reporting it as one is the worst outcome available: an
 	// agent gets ok:true and an empty string, and carries on. The thread is
 	// stored and resumable, so the error says how to continue it.
-	if turn.Finish == "max_steps" && strings.TrimSpace(turn.Assistant.Content) == "" {
+	if turn.Finish == "max_steps" && strings.TrimSpace(turn.Reply.Content) == "" {
 		out.Fail(out.ExternalError, "max_steps_exhausted",
 			fmt.Sprintf("the model was still calling tools after %d steps and never answered",
 				turn.Steps),
@@ -125,11 +125,11 @@ func chatCmd(fl *flags) {
 
 	fields := map[string]any{
 		"thread":     turn.Thread.ID,
-		"assistant":  a.Name,
+		"agent":      a.Name,
 		"model":      turn.Model,
-		"content":    turn.Assistant.Content,
-		"message_id": turn.Assistant.ID,
-		"seq":        turn.Assistant.Seq,
+		"content":    turn.Reply.Content,
+		"message_id": turn.Reply.ID,
+		"seq":        turn.Reply.Seq,
 		"usage":      turn.Usage,
 		"finish":     turn.Finish,
 	}
@@ -157,11 +157,11 @@ func chatCmd(fl *flags) {
 
 // toolsFor builds the registry for this turn.
 //
-// Tools are opt-in twice over: named here or on the assistant, and -- for
+// Tools are opt-in twice over: named here or on the agent, and -- for
 // anything that writes -- allowed again with --allow-writes. The second gate
 // exists because "give it tools" and "let it change things" are different
 // decisions that a single flag would collapse into one.
-func toolsFor(fl *flags, a hub.Assistant) *hub.Registry {
+func toolsFor(fl *flags, a hub.Agent) *hub.Registry {
 	if fl.has("no-tools") {
 		return nil
 	}
@@ -190,12 +190,12 @@ func toolsFor(fl *flags, a hub.Assistant) *hub.Registry {
 
 // memoryFor decides whether this turn recalls anything.
 //
-// --memory-project overrides the assistant's; --no-memory turns it off for
-// one turn without editing the assistant. A missing memgraph binary is fatal
+// --memory-project overrides the agent's; --no-memory turns it off for
+// one turn without editing the agent. A missing memgraph binary is fatal
 // only when memory was asked for explicitly on the command line -- an
-// assistant configured with a project on a machine without memgraph should
+// agent configured with a project on a machine without memgraph should
 // still answer, and say that it did so without memory.
-func memoryFor(fl *flags, a hub.Assistant) *hub.MemoryOptions {
+func memoryFor(fl *flags, a hub.Agent) *hub.MemoryOptions {
 	if fl.has("no-memory") {
 		return nil
 	}

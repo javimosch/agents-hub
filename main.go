@@ -1,4 +1,4 @@
-// Command ahub is the agent-first CLI for agents-hub: configurable assistants,
+// Command ahub is the agent-first CLI for agents-hub: configurable agents,
 // durable threads, one non-interactive chat turn at a time.
 //
 // It holds no database of its own. State and identity live in bkn; answers
@@ -44,8 +44,10 @@ func main() {
 		whoamiCmd(fl)
 	case "config":
 		configCmd(fl)
-	case "assistant":
-		assistantCmd(fl)
+	case "agent":
+		agentCmd(fl)
+	case "schedule":
+		scheduleCmd(fl)
 	case "thread":
 		threadCmd(fl)
 	case "chat":
@@ -58,8 +60,6 @@ func main() {
 		toolCmd(fl)
 	case "flow":
 		flowCmd(fl)
-	case "agent":
-		agentCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -155,17 +155,17 @@ func fail(err error, what string) {
 }
 
 func usage() {
-	out.Log(`ahub %s - agent-first CLI for configurable assistants over bkn
+	out.Log(`ahub %s - agent-first CLI for configurable agents over bkn
 
   ahub setup --admin-token <t>          declare the collections (once, by a human)
   ahub login --email <e> --password <p> store a user token in the active profile
   ahub whoami                           who bkn thinks you are
   ahub config [show|set-profile <n>]    inspect or switch profiles
 
-  ahub assistant create --name <n> --model <m> [--system <s>]
-  ahub assistant list|get|update|rm
+  ahub agent create --name <n> --model <m> [--system <s>]
+  ahub agent list|get|update|rm
 
-  ahub chat --assistant <n> --message <m> [--thread <id>] [--stream]
+  ahub chat --agent <n> --message <m> [--thread <id>] [--stream]
   ahub thread list|show|rm
 
   ahub memory recall --query <q> [--project <p>]   read memgraph directly
@@ -181,9 +181,9 @@ func usage() {
   ahub flow resume <run-id> --input k=v            continue a paused run
   ahub flow list|show|rm|runs
 
-  ahub agent create --name <n> --assistant <a> --prompt <p> [--every 6h|--at 03:20]
-  ahub agent run <name> | due | tick    tick runs everything due; a timer calls it
-  ahub agent list|show|rm|enable|disable|runs|scratchpad
+  ahub schedule create --name <n> --agent <a> --prompt <p> [--every 6h|--at 03:20]
+  ahub schedule run <name> | due | tick   tick runs everything due; a timer calls it
+  ahub schedule list|show|rm|enable|disable|runs|scratchpad
 
   ahub install [--prefix <dir>]         put this binary on $PATH
   ahub update [--check] [--force]       fetch the published build

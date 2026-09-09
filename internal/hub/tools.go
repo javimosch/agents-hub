@@ -98,7 +98,7 @@ func ToolCatalog() []map[string]any {
 // NewRegistry selects tools by name.
 //
 // Every tool here is backed by memgraph, which is deliberate: the first tools
-// an assistant gets are the ones that let it look things up rather than the
+// an agent gets are the ones that let it look things up rather than the
 // ones that let it act. A shell tool is not an oversight.
 func NewRegistry(names []string, mc *memory.Client, defaultProject string, allowWrites bool) (*Registry, error) {
 	if len(names) == 0 {
@@ -177,7 +177,7 @@ func builtins(mc *memory.Client, defaultProject string) map[string]Tool {
 					"that would not be general knowledge.",
 				Parameters: object(map[string]any{
 					"query":   prop("string", "What to search for."),
-					"project": prop("string", "Memory project to search. Omit to use the assistant's own project."),
+					"project": prop("string", "Memory project to search. Omit to use the agent's own project."),
 					"limit":   prop("integer", "How many memories to return (default 5)."),
 				}, "query"),
 			},

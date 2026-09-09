@@ -5,7 +5,7 @@ the product's own mental model and it ships inside the binary.
 
 ## What this is
 
-`ahub`, a Go CLI. A CLI-only port of the assistant layer of `an internal project`,
+`ahub`, a Go CLI. A CLI-only port of the agent layer of `an internal project`,
 storing everything in a bkn instance. Zero third-party dependencies — standard
 library only, like bkn. Keep it that way unless there is a reason that survives
 the question "what would this cost us at deploy time?".
@@ -15,7 +15,7 @@ the question "what would this cost us at deploy time?".
 | Path | What |
 |---|---|
 | `main.go`, `cmd_*.go`, `flags.go`, `config.go` | the CLI surface |
-| `internal/hub` | the domain: assistants, threads, messages, the chat turn, the tool loop |
+| `internal/hub` | the domain: agents, threads, messages, the chat turn, the tool loop |
 | `internal/memory` | the memgraph wrapper: recall, skills, and the rules that keep it safe |
 | `internal/flow` | the deterministic engine: definition, validator, templating, steps |
 | `internal/bkn` | HTTP client for the backend; the only place that knows bkn's wire shapes |

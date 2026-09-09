@@ -57,9 +57,9 @@ type Run struct {
 }
 
 // Asker performs an ask step. It is a function rather than an interface so
-// this package stays unaware of assistants, threads and providers: a flow
+// this package stays unaware of agents, threads and providers: a flow
 // knows it wants an answer, not how one is produced.
-type Asker func(ctx context.Context, assistant, prompt, thread string) (text, threadID string, tokens int, err error)
+type Asker func(ctx context.Context, agent, prompt, thread string) (text, threadID string, tokens int, err error)
 
 // Scripter runs a bkn script as the caller. Like Asker it is a function, so
 // this package needs to know nothing about bkn, tokens or HTTP. It returns
@@ -405,7 +405,7 @@ func (e *Engine) doAsk(ctx context.Context, run *Run, name string, s Step, r Ren
 		e.fail(run, name+": "+err.Error())
 		return
 	}
-	text, thread, tokens, err := e.Ask(ctx, s.Assistant, prompt, run.Thread)
+	text, thread, tokens, err := e.Ask(ctx, s.Agent, prompt, run.Thread)
 	if err != nil {
 		e.trace(run, name, s.Type, err.Error(), 0)
 		e.after(run, name, s, err.Error(), 0)
@@ -417,6 +417,6 @@ func (e *Engine) doAsk(ctx context.Context, run *Run, name string, s Step, r Ren
 	if s.Var != "" {
 		run.Data[s.Var] = text
 	}
-	e.trace(run, name, s.Type, s.Assistant, 0)
+	e.trace(run, name, s.Type, s.Agent, 0)
 	e.goTo(run, s.Next)
 }

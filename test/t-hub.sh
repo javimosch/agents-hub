@@ -73,7 +73,7 @@ chk "unknown command exits 80"        "80"      "$(code frobnicate)"
 chk "unknown command is typed"        "unknown_command" "$(err_type)"
 
 # --- auth gating -----------------------------------------------------------
-chk "no token exits 90"               "90"      "$(code assistant list)"
+chk "no token exits 90"               "90"      "$(code agent list)"
 chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
@@ -84,23 +84,23 @@ chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
 chk "config hides the token"          "True"    "$(a config show | j config.token_set)"
 
-# --- assistants ------------------------------------------------------------
-chk "create needs a model"            "82"      "$(code assistant create --name nomodel)"
-chk "create needs a name"             "82"      "$(code assistant create --model m1)"
-AID="$(a assistant create --name helper --model m1 --system "you are helper" --temperature 0.2 | j assistant.id)"
-chk "created assistant has an id"     "True"    "$([ -n "$AID" ] && echo True || echo False)"
-chk "assistant is listed"             "helper"  "$(a assistant list | j assistants.0.name)"
-chk "resolve by name"                 "$AID"    "$(a assistant get helper | j assistant.id)"
-chk "resolve by id"                   "helper"  "$(a assistant get "$AID" | j assistant.name)"
-chk "unknown assistant exits 92"      "92"      "$(code assistant get ghost)"
-chk "unknown assistant is typed"      "not_found" "$(err_type)"
-chk "update changes the system"       "sterner" "$(a assistant update helper --system sterner | j assistant.system)"
-chk "update needs a field"            "82"      "$(code assistant update helper)"
-chk "bad temperature exits 85"        "85"      "$(code assistant create --name t --model m --temperature abc)"
+# --- agents ------------------------------------------------------------
+chk "create needs a model"            "82"      "$(code agent create --name nomodel)"
+chk "create needs a name"             "82"      "$(code agent create --model m1)"
+AID="$(a agent create --name helper --model m1 --system "you are helper" --temperature 0.2 | j agent.id)"
+chk "created agent has an id"     "True"    "$([ -n "$AID" ] && echo True || echo False)"
+chk "agent is listed"             "helper"  "$(a agent list | j agents.0.name)"
+chk "resolve by name"                 "$AID"    "$(a agent get helper | j agent.id)"
+chk "resolve by id"                   "helper"  "$(a agent get "$AID" | j agent.name)"
+chk "unknown agent exits 92"      "92"      "$(code agent get ghost)"
+chk "unknown agent is typed"      "not_found" "$(err_type)"
+chk "update changes the system"       "sterner" "$(a agent update helper --system sterner | j agent.system)"
+chk "update needs a field"            "82"      "$(code agent update helper)"
+chk "bad temperature exits 85"        "85"      "$(code agent create --name t --model m --temperature abc)"
 
 # --- a chat turn -----------------------------------------------------------
-chk "chat needs a message"            "82"      "$(code chat --assistant helper)"
-OUT="$(a chat --assistant helper --message "first question")"
+chk "chat needs a message"            "82"      "$(code chat --agent helper)"
+OUT="$(a chat --agent helper --message "first question")"
 TID="$(printf '%s' "$OUT" | j thread)"
 chk "chat opened a thread"            "True"    "$([ -n "$TID" ] && echo True || echo False)"
 chkin "system prompt reached the model" "roles=system,user" "$(printf '%s' "$OUT" | j content)"
@@ -110,7 +110,7 @@ chk "usage is recorded"               "7"       "$(printf '%s' "$OUT" | j usage.
 chk "model is recorded"               "m1"      "$(printf '%s' "$OUT" | j model)"
 
 # --- history replay --------------------------------------------------------
-OUT2="$(a chat --assistant helper --thread "$TID" --message "second question")"
+OUT2="$(a chat --agent helper --thread "$TID" --message "second question")"
 chkin "history was replayed"          "roles=system,user,assistant,user" "$(printf '%s' "$OUT2" | j content)"
 chk "same thread continued"           "$TID"    "$(printf '%s' "$OUT2" | j thread)"
 chk "thread show returns 4 messages"  "4"       "$(a thread show "$TID" | j count)"
@@ -118,11 +118,11 @@ chk "messages are in order"           "user"    "$(a thread show "$TID" | j mess
 chk "seq increments"                  "3"       "$(a thread show "$TID" | j messages.3.seq)"
 chk "thread counts its messages"      "4"       "$(a thread show "$TID" | j thread.messages)"
 chk "thread is titled from turn one"  "first question" "$(a thread show "$TID" | j thread.title)"
-chk "threads are listed"              "helper"  "$(a thread list | j threads.0.assistant)"
-chk "unknown thread exits 92"         "92"      "$(code chat --assistant helper --thread nope --message hi)"
+chk "threads are listed"              "helper"  "$(a thread list | j threads.0.agent)"
+chk "unknown thread exits 92"         "92"      "$(code chat --agent helper --thread nope --message hi)"
 
 # --- streaming -------------------------------------------------------------
-S="$(a chat --assistant helper --message "stream me" --stream)"
+S="$(a chat --agent helper --message "stream me" --stream)"
 chk "stream emits NDJSON deltas"      "delta"   "$(printf '%s' "$S" | head -1 | j type)"
 chk "every stream line is JSON"       "ok"      "$(printf '%s' "$S" | python3 -c 'import json,sys
 [json.loads(l) for l in sys.stdin if l.strip()]
@@ -132,7 +132,7 @@ chkin "streamed content is assembled" "echo=stream me" "$(printf '%s' "$S" | tai
 
 # --- provider failure ------------------------------------------------------
 curl -sf -X POST "$P/control/fail" -d '{"fail":true}' >/dev/null
-chk "provider failure exits 105"      "105"     "$(code chat --assistant helper --thread "$TID" --message boom)"
+chk "provider failure exits 105"      "105"     "$(code chat --agent helper --thread "$TID" --message boom)"
 chk "provider failure is typed"       "provider_error" "$(err_type)"
 chk "provider failure is recoverable" "True"    "$(errj error.recoverable)"
 chk "the question survived the failure" "5"     "$(a thread show "$TID" | j count)"
@@ -157,17 +157,17 @@ chk "projects passes through"         "demo"    "$(a memory projects | j project
 chk "a dashed project is refused"     "85"      "$(code memory recall --query hi --project=-oops)"
 chk "a dashed project is typed"       "invalid_value" "$(err_type)"
 
-# The assistant carries the project; the chat turn injects a second system
+# The agent carries the project; the chat turn injects a second system
 # message. The echoing provider reports the roles it actually received.
-a assistant create --name remembers --model m1 --system "sys" --memory-project demo >/dev/null
-M="$(a chat --assistant remembers --message "how does the seeder release its port")"
+a agent create --name remembers --model m1 --system "sys" --memory-project demo >/dev/null
+M="$(a chat --agent remembers --message "how does the seeder release its port")"
 chkin "memory reaches the model"      "mem=1"   "$(printf '%s' "$M" | j content)"
 chk "the turn reports memory use"     "2"       "$(printf '%s' "$M" | j memory.used)"
 chk "the memory project is reported"  "demo"    "$(printf '%s' "$M" | j memory.project)"
 chkin "the recall query was the message" "how does the seeder release its port" "$(printf '%s' "$M" | j content)"
 
 # argv, not a shell line: a message full of metacharacters arrives verbatim.
-a chat --assistant remembers --message 'rm -rf /; $(touch /tmp/pwned) `id` && echo x' >/dev/null
+a chat --agent remembers --message 'rm -rf /; $(touch /tmp/pwned) `id` && echo x' >/dev/null
 chk "no shell interpretation"         "False"   "$([ -e /tmp/pwned ] && echo True || echo False)"
 chk "the whole message reached memgraph" "True" "$(python3 -c '
 import json,sys
@@ -177,21 +177,21 @@ for line in open(sys.argv[1]):
     if want in argv: print("True"); break
 else: print("False")' "$WORK/memgraph.argv")"
 
-chkin "--no-memory skips recall"      "mem=0"   "$(a chat --assistant remembers --no-memory --message hi | j content)"
+chkin "--no-memory skips recall"      "mem=0"   "$(a chat --agent remembers --no-memory --message hi | j content)"
 
 # A memory store that is down degrades the answer; it does not withhold it.
-FAKE_MEMGRAPH_FAIL=1 "$AHUB" chat --assistant remembers --message "still answer me" >"$WORK/degraded" 2>/dev/null
+FAKE_MEMGRAPH_FAIL=1 "$AHUB" chat --agent remembers --message "still answer me" >"$WORK/degraded" 2>/dev/null
 chk "a failed recall still answers"   "True"    "$(j ok <"$WORK/degraded")"
 chkin "the failure is reported"       "store on fire" "$(j memory.error <"$WORK/degraded")"
 chk "nothing was injected"            "0"       "$(j memory.used <"$WORK/degraded")"
-chk "--memory-required makes it fatal" "105"    "$(FAKE_MEMGRAPH_FAIL=1 code chat --assistant remembers --memory-required --message x)"
+chk "--memory-required makes it fatal" "105"    "$(FAKE_MEMGRAPH_FAIL=1 code chat --agent remembers --memory-required --message x)"
 
 # A machine without memgraph: explicit memory is an error, a configured
-# assistant still answers.
+# agent still answers.
 chk "missing memgraph exits 92"       "92"      "$(AHUB_MEMGRAPH=/nonexistent code memory status)"
 chk "missing memgraph is typed"       "memgraph_missing" "$(err_type)"
-chk "explicit --memory-project needs it" "92"   "$(AHUB_MEMGRAPH=/nonexistent code chat --assistant helper --memory-project demo --message hi)"
-chk "a configured assistant degrades" "True"    "$(AHUB_MEMGRAPH=/nonexistent a chat --assistant remembers --message hi | j ok)"
+chk "explicit --memory-project needs it" "92"   "$(AHUB_MEMGRAPH=/nonexistent code chat --agent helper --memory-project demo --message hi)"
+chk "a configured agent degrades" "True"    "$(AHUB_MEMGRAPH=/nonexistent a chat --agent remembers --message hi | j ok)"
 
 # --- skills ----------------------------------------------------------------
 # A skill is instruction, not reference: it is loaded only when named, and the
@@ -210,18 +210,18 @@ chk "skill recommend answers"         "demo-skill" "$(a skill recommend "release
 chkin "skill show loads the file"     "stop channel" "$(a skill show demo-skill | j content)"
 chk "an unknown skill is not found"   "92"      "$(code skill show no-such-skill)"
 
-K="$(a chat --assistant helper --skill demo-skill --message "how do I release a port")"
+K="$(a chat --agent helper --skill demo-skill --message "how do I release a port")"
 chkin "the skill reaches the model"   "skl=1"   "$(printf '%s' "$K" | j content)"
 chk "the turn reports the skill"      "demo-skill" "$(printf '%s' "$K" | j skills.loaded.0)"
-chkin "no skill without one named"    "skl=0"   "$(a chat --assistant helper --message plain | j content)"
-chkin "--no-skills wins"              "skl=0"   "$(a chat --assistant helper --skill demo-skill --no-skills --message x | j content)"
+chkin "no skill without one named"    "skl=0"   "$(a chat --agent helper --message plain | j content)"
+chkin "--no-skills wins"              "skl=0"   "$(a chat --agent helper --skill demo-skill --no-skills --message x | j content)"
 
-# An assistant can carry its skills, and a missing one degrades by default.
-a assistant create --name skilled --model m1 --system "sys" --skills demo-skill,ghost-skill >/dev/null
-SK="$(a chat --assistant skilled --message "how do I release a port")"
+# An agent can carry its skills, and a missing one degrades by default.
+a agent create --name skilled --model m1 --system "sys" --skills demo-skill,ghost-skill >/dev/null
+SK="$(a chat --agent skilled --message "how do I release a port")"
 chkin "a configured skill is loaded"  "skl=1"   "$(printf '%s' "$SK" | j content)"
 chk "the missing one is reported"     "True"    "$(printf '%s' "$SK" | python3 -c 'import json,sys;print("ghost-skill" in (json.load(sys.stdin)["skills"].get("skipped") or {}))')"
-chk "--skills-required makes it fatal" "92"     "$(code chat --assistant skilled --skills-required --message x)"
+chk "--skills-required makes it fatal" "92"     "$(code chat --agent skilled --skills-required --message x)"
 
 # A skill whose file is not markdown is refused, wherever the path came from.
 # 85, not 105: this tool refused the path, memgraph did not fail.
@@ -233,13 +233,13 @@ chkin "and it says why"               "not markdown" "$(errj error.message)"
 # history: the same two-pass shape a real model produces.
 chk "the catalog needs nothing"       "4"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
 chk "the catalog marks what writes"   "memory_save" "$("$AHUB" tool list | python3 -c 'import json,sys;print(",".join(t["name"] for t in json.load(sys.stdin)["tools"] if t["writes"]))')"
-chk "an unknown tool is refused"      "85"      "$(code chat --assistant helper --tools no_such_tool --message x)"
+chk "an unknown tool is refused"      "85"      "$(code chat --agent helper --tools no_such_tool --message x)"
 chkin "and it lists the real ones"    "memory_recall" "$(errj error.message)"
-chk "a writing tool needs consent"    "85"      "$(code chat --assistant helper --tools memory_save --message x)"
+chk "a writing tool needs consent"    "85"      "$(code chat --agent helper --tools memory_save --message x)"
 chkin "and it says which flag"        "--allow-writes" "$(errj error.message)"
-chk "consent enables it"              "True"    "$(a chat --assistant helper --tools memory_save --allow-writes --message x | j ok)"
+chk "consent enables it"              "True"    "$(a chat --agent helper --tools memory_save --allow-writes --message x | j ok)"
 
-T1="$(a chat --assistant helper --tools memory_recall --message "how do I release a port")"
+T1="$(a chat --agent helper --tools memory_recall --message "how do I release a port")"
 chk "the loop ran two steps"          "2"       "$(printf '%s' "$T1" | j steps)"
 chk "the tool ran"                    "memory_recall" "$(printf '%s' "$T1" | j tool_runs.0.name)"
 chk "the tool produced output"        "True"    "$(printf '%s' "$T1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tool_runs"][0]["chars"] > 0)')"
@@ -255,18 +255,18 @@ chk "the tool turn keeps its id"      "call_1"  "$(a thread show "$TT" | j messa
 
 # Resuming a thread that contains tool turns must replay them intact: a
 # provider rejects a tool result whose matching call is missing.
-R="$(a chat --assistant helper --thread "$TT" --tools memory_recall --message "and now?")"
+R="$(a chat --agent helper --thread "$TT" --tools memory_recall --message "and now?")"
 chk "a thread with tool turns resumes" "True"   "$(printf '%s' "$R" | j ok)"
 chkin "the replay kept the tool role" "roles=system,user,assistant,tool" "$(printf '%s' "$R" | j content)"
 
 # A tool that fails answers the model instead of killing the turn.
-chk "a failing tool still answers"    "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --assistant helper --tools memory_recall --message x | j ok)"
-chk "and the failure is reported"     "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --assistant helper --tools memory_recall --message x | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["tool_runs"][0]["failed"]))')"
+chk "a failing tool still answers"    "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --agent helper --tools memory_recall --message x | j ok)"
+chk "and the failure is reported"     "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat --agent helper --tools memory_recall --message x | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["tool_runs"][0]["failed"]))')"
 
 # The step cap is a budget, so hitting it is said out loud. When the model
 # never produced text, that is a failure with a resumable thread, not an
 # answer: ok:true with an empty string is the worst thing to hand an agent.
-chk "max-steps without an answer fails" "105"   "$(code chat --assistant helper --tools memory_recall --max-steps 1 --message x)"
+chk "max-steps without an answer fails" "105"   "$(code chat --agent helper --tools memory_recall --max-steps 1 --message x)"
 chk "and it is typed"                 "max_steps_exhausted" "$(err_type)"
 chkin "and it says how to resume"     "--max-steps 20" "$(errj error.suggestions.0)"
 
@@ -274,26 +274,26 @@ chkin "and it says how to resume"     "--max-steps 20" "$(errj error.suggestions
 # than being handed whatever error an empty string produces downstream.
 tool_mode() { curl -sf -X POST "$P/control/tool" -d "$1" >/dev/null; }
 tool_mode '{"args":"{\"nope\":\"x\"}"}'
-MA="$(a chat --assistant helper --tools memory_recall --message x)"
+MA="$(a chat --agent helper --tools memory_recall --message x)"
 chkin "a missing parameter is named"  "requires the parameter" "$(printf '%s' "$MA" | j content)"
 chk "and the run records it"          "missing required parameter query" "$(printf '%s' "$MA" | j tool_runs.0.failed)"
 
 # A hallucinated tool name gets the real list back, so the model can correct.
 tool_mode '{"tool":"memory_search","args":"{}"}'
-HT="$(a chat --assistant helper --tools memory_recall,skill_show --message x)"
+HT="$(a chat --agent helper --tools memory_recall,skill_show --message x)"
 chkin "an unknown tool lists the real ones" "Available tools: memory_recall, skill_show" "$(printf '%s' "$HT" | j content)"
 tool_mode '{"args":"{\"query\":\"ports\"}"}'   # back to the default for later sections
 
 # Streamed tool calls are accumulated from fragments.
-ST="$(a chat --assistant helper --tools memory_recall --stream --message "stream a tool")"
+ST="$(a chat --agent helper --tools memory_recall --stream --message "stream a tool")"
 chk "a streamed tool call works"      "True"    "$(printf '%s' "$ST" | tail -1 | j ok)"
 chk "the streamed loop ran twice"     "2"       "$(printf '%s' "$ST" | tail -1 | j steps)"
 
-# An assistant can carry its tools.
-a assistant create --name tooled --model m1 --system sys --tools memory_recall,skill_show >/dev/null
-chk "a configured tool set is used"   "2"       "$(a chat --assistant tooled --message x | j steps)"
-chk "--no-tools wins"                 "1"       "$(a chat --assistant tooled --no-tools --message x | j steps)"
-chk "a turn without tools is one step" "1"      "$(a chat --assistant helper --message x | j steps)"
+# An agent can carry its tools.
+a agent create --name tooled --model m1 --system sys --tools memory_recall,skill_show >/dev/null
+chk "a configured tool set is used"   "2"       "$(a chat --agent tooled --message x | j steps)"
+chk "--no-tools wins"                 "1"       "$(a chat --agent tooled --no-tools --message x | j steps)"
+chk "a turn without tools is one step" "1"      "$(a chat --agent helper --message x | j steps)"
 
 # --- flows -----------------------------------------------------------------
 # The deterministic half. The claim being tested is not that flows work but
@@ -408,10 +408,10 @@ chk "the secret is not in the run"    "False"   "$(a flow run secretflow | grep 
 chk "config lists secrets by name only" "TOK"   "$(a config show | j config.secrets.0)"
 chk "and never their values"          "False"   "$(a config show | grep -c hunter2 | sed 's/^0$/False/;s/^[1-9].*/True/')"
 
-# The one step that costs money, wired to a real assistant and thread.
+# The one step that costs money, wired to a real agent and thread.
 cat > "$WORK/ask.json" <<'FLOW'
 {"name":"askflow","start":"a","steps":{
-  "a":{"type":"ask","assistant":"helper","prompt":"summarise: {{topic}}","var":"answer","next":"b"},
+  "a":{"type":"ask","agent":"helper","prompt":"summarise: {{topic}}","var":"answer","next":"b"},
   "b":{"type":"message","text":"said {{answer}}","next":"c"},
   "c":{"type":"end"}}}
 FLOW
@@ -481,79 +481,79 @@ a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
 
-# --- agents (autonomous runs) ----------------------------------------------
-# An agent is a standing instruction: run this assistant on this schedule with
+# --- schedules (autonomous runs) ----------------------------------------------
+# An schedule is a standing instruction: run this agent on this schedule with
 # nobody watching. What carries between runs is a bounded scratchpad, never
 # the conversation -- replayed history would make every run cost more than the
 # last and eventually stop fitting.
-chk "an agent needs a prompt"         "82"      "$(code agent create --name a1 --assistant helper)"
+chk "an schedule needs a prompt"         "82"      "$(code schedule create --name a1 --agent helper)"
 chkin "and says why"                  "burns tokens" "$(errj error.message)"
-chk "every and at are exclusive"      "82"      "$(code agent create --name a2 --assistant helper --prompt p --every 1h --at 03:00)"
-chk "a bad time of day is refused"    "85"      "$(code agent create --name a3 --assistant helper --prompt p --at 25:99)"
-chk "a sub-minute interval is refused" "85"     "$(code agent create --name a4 --assistant helper --prompt p --every 5s)"
+chk "every and at are exclusive"      "82"      "$(code schedule create --name a2 --agent helper --prompt p --every 1h --at 03:00)"
+chk "a bad time of day is refused"    "85"      "$(code schedule create --name a3 --agent helper --prompt p --at 25:99)"
+chk "a sub-minute interval is refused" "85"     "$(code schedule create --name a4 --agent helper --prompt p --every 5s)"
 
-AG="$(a agent create --name nightly --assistant helper --prompt "check the port" --every 6h)"
-chk "create schedules the first run"  "True"    "$(printf '%s' "$AG" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["agent"]["next_run_at"]))')"
-chk "and it is enabled"               "True"    "$(printf '%s' "$AG" | j agent.enabled)"
-chk "it is listed"                    "nightly" "$(a agent list | j agents.0.name)"
-chk "nothing is due yet"              "0"       "$(a agent due | j count)"
+AG="$(a schedule create --name nightly --agent helper --prompt "check the port" --every 6h)"
+chk "create schedules the first run"  "True"    "$(printf '%s' "$AG" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["schedule"]["next_run_at"]))')"
+chk "and it is enabled"               "True"    "$(printf '%s' "$AG" | j schedule.enabled)"
+chk "it is listed"                    "nightly" "$(a schedule list | j schedules.0.name)"
+chk "nothing is due yet"              "0"       "$(a schedule due | j count)"
 
-R1="$(a agent run nightly)"
+R1="$(a schedule run nightly)"
 chk "a manual run works"              "ok"      "$(printf '%s' "$R1" | j status)"
-chk "it is recorded"                  "1"       "$(a agent runs --agent nightly | j count)"
-chk "the trigger is recorded"         "manual"  "$(a agent runs --agent nightly | j runs.0.trigger)"
+chk "it is recorded"                  "1"       "$(a schedule runs --schedule nightly | j count)"
+chk "the trigger is recorded"         "manual"  "$(a schedule runs --schedule nightly | j runs.0.trigger)"
 chkin "the scratchpad tool is always offered" "tools=1" "$(printf '%s' "$R1" | j answer)"
 chkin "and the run starts a fresh thread" "users=1" "$(printf '%s' "$R1" | j answer)"
 chkin "with no note to carry yet"     "pad=0"   "$(printf '%s' "$R1" | j answer)"
 
 # The model writes its own note; the next run receives it.
 tool_mode '{"tool":"scratchpad","args":"{\"text\":\"port released cleanly; check the backoff next\"}"}'
-R2="$(a agent run nightly)"
-chk "the agent wrote its note"        "True"    "$(printf '%s' "$R2" | j scratchpad_written)"
-chkin "the note is stored"            "check the backoff next" "$(a agent scratchpad nightly | j scratchpad)"
+R2="$(a schedule run nightly)"
+chk "the schedule wrote its note"        "True"    "$(printf '%s' "$R2" | j scratchpad_written)"
+chkin "the note is stored"            "check the backoff next" "$(a schedule scratchpad nightly | j scratchpad)"
 tool_mode '{"tool":null,"args":"{\"query\":\"ports\"}"}'
-R3="$(a agent run nightly)"
+R3="$(a schedule run nightly)"
 chkin "the next run carries it"       "pad=1"   "$(printf '%s' "$R3" | j answer)"
 chkin "and still replays no history"  "users=1" "$(printf '%s' "$R3" | j answer)"
 
 # A human can read and correct it: it is the one piece of an autonomous
-# agent's state that is meant to be legible.
-chk "a human can set it"              "True"    "$(a agent scratchpad nightly --set "corrected by hand" | j written)"
-chk "and read it back"                "corrected by hand" "$(a agent scratchpad nightly | j scratchpad)"
-chk "and clear it"                    "True"    "$(a agent scratchpad nightly --clear | j cleared)"
-chk "clearing leaves nothing"         "0"       "$(a agent scratchpad nightly | j chars)"
+# schedule's state that is meant to be legible.
+chk "a human can set it"              "True"    "$(a schedule scratchpad nightly --set "corrected by hand" | j written)"
+chk "and read it back"                "corrected by hand" "$(a schedule scratchpad nightly | j scratchpad)"
+chk "and clear it"                    "True"    "$(a schedule scratchpad nightly --clear | j cleared)"
+chk "clearing leaves nothing"         "0"       "$(a schedule scratchpad nightly | j chars)"
 
 # Scheduling: tick is what a timer calls, and it is the only entry point.
-a agent create --name frequent --assistant helper --prompt "tick me" --every 1m >/dev/null
-a agent scratchpad frequent --set "x" >/dev/null
+a schedule create --name frequent --agent helper --prompt "tick me" --every 1m >/dev/null
+a schedule scratchpad frequent --set "x" >/dev/null
 python3 -c "
 import json,subprocess,sys
 " # (no-op: the due time is set in the past below through the API)
-DUEID="$(a agent show frequent | j agent.id)"
+DUEID="$(a schedule show frequent | j schedule.id)"
 curl -s -X PATCH -H "Authorization: Bearer $(python3 -c "
-import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/agents/$DUEID" >/dev/null
-chk "an overdue agent is due"         "frequent" "$(a agent due | j due.0)"
-TICK="$(a agent tick)"
+import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/schedules/$DUEID" >/dev/null
+chk "an overdue schedule is due"         "frequent" "$(a schedule due | j due.0)"
+TICK="$(a schedule tick)"
 chk "tick runs it"                    "1"       "$(printf '%s' "$TICK" | j ran)"
 chk "and reports no failures"         "0"       "$(printf '%s' "$TICK" | j failed)"
-chk "the trigger says schedule"       "schedule" "$(a agent runs --agent frequent | j runs.0.trigger)"
-chk "and it is no longer due"         "0"       "$(a agent due | j count)"
+chk "the trigger says schedule"       "schedule" "$(a schedule runs --schedule frequent | j runs.0.trigger)"
+chk "and it is no longer due"         "0"       "$(a schedule due | j count)"
 
-# A disabled agent never becomes due, whatever its schedule says.
-a agent disable frequent >/dev/null
+# A disabled schedule never becomes due, whatever its schedule says.
+a schedule disable frequent >/dev/null
 curl -s -X PATCH -H "Authorization: Bearer $(python3 -c "
-import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/agents/$DUEID" >/dev/null
-chk "a disabled agent is not due"     "0"       "$(a agent due | j count)"
-chk "re-enabling re-arms it"          "True"    "$(a agent enable frequent | j agent.enabled)"
-chk "and does not fire for missed slots" "0"    "$(a agent due | j count)"
+import json;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")"   -H 'Content-Type: application/json'   -d '{"next_run_at":"2020-01-01T00:00:00Z"}' "$B/v1/store/hub/schedules/$DUEID" >/dev/null
+chk "a disabled schedule is not due"     "0"       "$(a schedule due | j count)"
+chk "re-enabling re-arms it"          "True"    "$(a schedule enable frequent | j schedule.enabled)"
+chk "and does not fire for missed slots" "0"    "$(a schedule due | j count)"
 
-# A failing run is recorded and the schedule still advances: an agent that
+# A failing run is recorded and the schedule still advances: an schedule that
 # stopped rescheduling when it broke would go quiet exactly when it mattered.
-a agent create --name broken --assistant no-such-assistant --prompt p --every 1h >/dev/null
-chk "a broken agent fails loudly"     "105"     "$(code agent run broken)"
-chk "and is typed"                    "agent_run_failed" "$(err_type)"
-chk "the failure is recorded"         "failed"  "$(a agent runs --agent broken | j runs.0.status)"
-chk "and it is still scheduled"       "True"    "$(a agent show broken | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["agent"]["next_run_at"]))')"
+a schedule create --name broken --agent no-such-agent --prompt p --every 1h >/dev/null
+chk "a broken schedule fails loudly"     "105"     "$(code schedule run broken)"
+chk "and is typed"                    "schedule_run_failed" "$(err_type)"
+chk "the failure is recorded"         "failed"  "$(a schedule runs --schedule broken | j runs.0.status)"
+chk "and it is still scheduled"       "True"    "$(a schedule show broken | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["schedule"]["next_run_at"]))')"
 
 # --- install / update ------------------------------------------------------
 # cli-update-spec: a binary already in hand relocates itself, and updates
@@ -644,17 +644,17 @@ b() { AHUB_PROFILE=other "$AHUB" "$@" 2>"$WORK/err"; }
 bcode() { AHUB_PROFILE=other "$AHUB" "$@" >"$WORK/out" 2>"$WORK/err"; echo $?; }
 b login --email other@hub.test --password hunter2hunter2 >/dev/null
 chk "second user is a different identity" "other@hub.test" "$(b whoami | j me.user.email)"
-chk "second user sees no assistants"   "0"       "$(b assistant list | j count)"
+chk "second user sees no agents"   "0"       "$(b agent list | j count)"
 chk "second user sees no threads"      "0"       "$(b thread list | j count)"
-chk "second user cannot read the assistant by id" "92" "$(bcode assistant get "$AID")"
+chk "second user cannot read the agent by id" "92" "$(bcode agent get "$AID")"
 chk "second user cannot read the thread"          "92" "$(bcode thread show "$TID")"
-chk "second user cannot chat into the thread"     "92" "$(bcode chat --assistant helper --thread "$TID" --message steal)"
-chk "second user cannot delete the assistant"     "92" "$(bcode assistant rm "$AID")"
-chk "the assistant is still there"     "helper"  "$(a assistant get "$AID" | j assistant.name)"
+chk "second user cannot chat into the thread"     "92" "$(bcode chat --agent helper --thread "$TID" --message steal)"
+chk "second user cannot delete the agent"     "92" "$(bcode agent rm "$AID")"
+chk "the agent is still there"     "helper"  "$(a agent get "$AID" | j agent.name)"
 
 # --- bkn down --------------------------------------------------------------
 kill "$BKN_PID" 2>/dev/null; wait "$BKN_PID" 2>/dev/null
-chk "bkn down exits 100"              "100"     "$(code assistant list)"
+chk "bkn down exits 100"              "100"     "$(code agent list)"
 chk "bkn down is typed"               "connection_error" "$(err_type)"
 chk "bkn down is recoverable"         "True"    "$(errj error.recoverable)"
 BKN_PID=""

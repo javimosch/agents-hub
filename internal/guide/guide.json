@@ -1,14 +1,15 @@
 {
   "tool": "ahub",
-  "one_liner": "Run a configured assistant from the command line, non-interactively, with the conversation stored durably in bkn.",
+  "one_liner": "Run a configured agent from the command line, non-interactively, with the conversation stored durably in bkn.",
   "model": {
-    "what_it_is": "An assistant is a saved prompt + model. A thread is a conversation with one assistant. A chat is one turn: your message in, the model's answer out, both appended to the thread.",
-    "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/assistants, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
+    "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/agents, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
     "what_it_is_not": "Not a chat UI and not a daemon. No RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text. No sub-agents, HITL or workflows yet.",
     "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them.",
-    "tools": "An assistant may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per assistant or per call, every one is backed by memgraph, and anything that writes needs --allow-writes as well.",
+    "tools": "An agent may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per agent or per call, every one is backed by memgraph, and anything that writes needs --allow-writes as well.",
     "flows": "A flow is a path expressed as data: steps, a start, and where each goes next. Most step types cost nothing -- collect a value, branch on it, run an allowlisted CLI, call an allowlisted host -- and exactly one (ask) calls a model. A run pauses when it needs input and is resumed by id, so a wizard works in a tool that must never prompt.",
-    "agents": "An agent is a standing instruction: run this assistant, on this schedule, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying an autonomous agent's history would make every run cost more than the last and eventually stop fitting; a note cannot."
+    "agents": "An agent is a saved configuration: a system prompt, a model, and optionally a memory project, skills and tools. It is the noun this tool is named after. `ahub chat --agent <name>` talks to one; a flow's ask step calls one; a schedule runs one unattended.",
+    "schedules": "A schedule is a standing instruction: run this agent, on this cadence, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying history would make every run cost more than the last and eventually stop fitting; a note cannot.",
+    "what_it_is": "An agent is a saved prompt + model. A thread is a conversation with one agent. A chat is one turn. A flow is a deterministic path. A schedule runs an agent unattended."
   },
   "loop": [
     {
@@ -20,15 +21,15 @@
       "why": "Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see."
     },
     {
-      "command": "ahub assistant create --name helper --model <m> --system \"...\"",
+      "command": "ahub agent create --name helper --model <m> --system \"...\"",
       "why": "Saves the configuration once so later turns are one short command."
     },
     {
-      "command": "ahub chat --assistant helper --message \"...\"",
+      "command": "ahub chat --agent helper --message \"...\"",
       "why": "Opens a thread and answers. Prints the thread id; pass it back with --thread to continue."
     },
     {
-      "command": "ahub chat --assistant helper --thread <id> --message \"...\"",
+      "command": "ahub chat --agent helper --thread <id> --message \"...\"",
       "why": "Continues an existing conversation. History is replayed to the model automatically."
     },
     {
@@ -36,8 +37,8 @@
       "why": "The full transcript, in order, with per-message token counts."
     },
     {
-      "command": "ahub assistant update helper --memory-project <p> --skills a,b",
-      "why": "Gives an assistant a memory scope and a set of procedures. Both are opt-in and both are named in the configuration, so an answer can be reproduced from it."
+      "command": "ahub agent update helper --memory-project <p> --skills a,b",
+      "why": "Gives an agent a memory scope and a set of procedures. Both are opt-in and both are named in the configuration, so an answer can be reproduced from it."
     },
     {
       "command": "ahub memory recall --query \"...\" --project <p>",
@@ -52,7 +53,7 @@
       "why": "What a model can be given. Needs no token and no backend: discover the surface before wiring anything."
     },
     {
-      "command": "ahub chat --assistant helper --tools memory_recall,skill_show --message \"...\"",
+      "command": "ahub chat --agent helper --tools memory_recall,skill_show --message \"...\"",
       "why": "Let the model look things up for itself. The answer reports steps and tool_runs, so you can see what it actually did."
     },
     {
@@ -76,7 +77,7 @@
       "why": "Fetch the published build. The version is sha256[:12] of the artifact, so there is no number to bump: identical bytes are the same version."
     },
     {
-      "command": "ahub agent create --name nightly --assistant helper --prompt \"...\" --every 6h",
+      "command": "ahub agent create --name nightly --agent helper --prompt \"...\" --every 6h",
       "why": "A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub agent run <name>`."
     },
     {
@@ -115,15 +116,15 @@
     },
     {
       "name": "the tool loop",
-      "what": "Up to --max-steps (default 8) passes: each pass either answers or asks for tools, whose results are appended and fed back. Every assistant and tool turn is stored, so a thread with tool calls resumes correctly."
+      "what": "Up to --max-steps (default 8) passes: each pass either answers or asks for tools, whose results are appended and fed back. Every agent and tool turn is stored, so a thread with tool calls resumes correctly."
     },
     {
       "name": "two gates on writes",
       "what": "Naming a tool enables it; a tool that changes state needs --allow-writes too. 'Give it tools' and 'let it change things' are different decisions and one flag would collapse them."
     },
     {
-      "name": "flow vs assistant",
-      "what": "An assistant improvises and pays per turn; a flow follows a path someone designed and pays only for its ask steps. Use a flow when the sequence is known and must be reproducible, an assistant when it is not."
+      "name": "flow vs agent",
+      "what": "An agent improvises and pays per turn; a flow follows a path someone designed and pays only for its ask steps. Use a flow when the sequence is known and must be reproducible, an agent when it is not."
     },
     {
       "name": "allowlists",
@@ -151,16 +152,20 @@
     },
     {
       "name": "agent vs flow",
-      "what": "A flow is a path someone designed and pays only for its ask steps. An agent is a model deciding what to do, on a schedule, and pays every run. Reach for a flow when the sequence is known; an agent when it is not."
+      "what": "A flow is a path someone designed and pays only for its ask steps. A schedule lets an agent decide what to do, on a cadence, and pays every run. Reach for a flow when the sequence is known; a schedule when it is not."
+    },
+    {
+      "name": "agent vs schedule",
+      "what": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences. \"Assistant\" is the internal project's word for the same thing and is not used here."
     }
   ],
   "gotchas": [
     "The user message is stored before the model is called. A provider timeout costs you the answer, not the question: retry with the same --thread.",
     "--stream emits NDJSON delta objects on stdout, then the final envelope. It is not bare text; parse per line.",
-    "An assistant name that matches two assistants is an error, not a coin flip. Use the id, or rename one.",
+    "An agent name that matches two agents is an error, not a coin flip. Use the id, or rename one.",
     "Exit 105 means the model provider failed and a retry may work. Exit 90 means your token is wrong or expired and retrying will not help.",
     "`ahub setup` needs the bkn ADMIN token; nothing else does. If a command asks you for the admin token, that is a bug.",
-    "Deleting an assistant leaves its threads: a conversation that happened is a fact, and dropping the config does not un-happen it.",
+    "Deleting an agent leaves its threads: a conversation that happened is a fact, and dropping the config does not un-happen it.",
     "Memories are framed as reference material and the model is told not to follow instructions inside them. Skills are the opposite: they ARE instructions, which is why one is only loaded when named.",
     "A memory or skill that cannot be loaded degrades the turn instead of failing it, and says so in the answer's `memory.error` / `skills.skipped`. Pass --memory-required or --skills-required to make it fatal.",
     "Several servers behind the OpenAI wire shape keep only the FIRST system message; ahub merges the leading run into one, which is what makes an injected memory block actually arrive.",
@@ -168,7 +173,7 @@
     "An expired access token is refreshed and re-persisted automatically -- but only for a token that came from the profile. A token passed in by --token or AHUB_TOKEN is yours to manage.",
     "A tool failure is returned to the model as the tool's result, not raised. It can then try something else, and the failure is still visible in tool_runs[].failed.",
     "Running out of steps with no answer is exit 105 (max_steps_exhausted), not a successful empty answer. The thread is stored: resume it with --thread and a bigger --max-steps.",
-    "memory_recall defaults its project to the assistant's memory_project. Without that a model omits the project (it reads as context, not a parameter), every call fails, and it retries the same shape until the cap.",
+    "memory_recall defaults its project to the agent's memory_project. Without that a model omits the project (it reads as context, not a parameter), every call fails, and it retries the same shape until the cap.",
     "Usage is summed across every step of the loop, not just the last call.",
     "A flow run that needs input exits 92 (needs_input) with the run id and the exact resume command. That is not a failure; a failed step is exit 105.",
     "An unset {{variable}} fails the step instead of substituting an empty string: a command with a silently empty argument is a different command.",
@@ -187,23 +192,23 @@
   ],
   "recipes": [
     {
-      "command": "ahub chat --assistant helper --message \"$(cat prompt.txt)\" | jq -r .content",
+      "command": "ahub chat --agent helper --message \"$(cat prompt.txt)\" | jq -r .content",
       "why": "The answer alone, for a pipeline."
     },
     {
-      "command": "ahub thread list --assistant helper --limit 5",
-      "why": "The five most recently touched conversations with one assistant."
+      "command": "ahub thread list --agent helper --limit 5",
+      "why": "The five most recently touched conversations with one agent."
     },
     {
-      "command": "ahub chat --assistant helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'",
+      "command": "ahub chat --agent helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'",
       "why": "Watch the answer arrive while still getting a parseable stream."
     },
     {
-      "command": "ahub chat --assistant helper --memory-project machin --message \"why does the daemon loop leak?\"",
-      "why": "One turn with recalled context, without changing the saved assistant."
+      "command": "ahub chat --agent helper --memory-project machin --message \"why does the daemon loop leak?\"",
+      "why": "One turn with recalled context, without changing the saved agent."
     },
     {
-      "command": "ahub chat --assistant helper --skill agent-first-cli-specs --message \"audit this exit code table\"",
+      "command": "ahub chat --agent helper --skill agent-first-cli-specs --message \"audit this exit code table\"",
       "why": "Load a procedure for one turn."
     },
     {
@@ -211,7 +216,7 @@
       "why": "The answer plus exactly what informed it."
     },
     {
-      "command": "ahub chat --assistant agent --tools memory_recall --message '...' | jq '{answer:.content, steps, tools:[.tool_runs[].name]}'",
+      "command": "ahub chat --agent agent --tools memory_recall --message '...' | jq '{answer:.content, steps, tools:[.tool_runs[].name]}'",
       "why": "The answer plus the path it took to get there."
     },
     {

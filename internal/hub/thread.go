@@ -8,19 +8,19 @@ import (
 	"github.com/javimosch/agents-hub/internal/bkn"
 )
 
-// Thread is one conversation with one assistant.
+// Thread is one conversation with one agent.
 type Thread struct {
-	ID          string `json:"id"`
-	AssistantID string `json:"assistant_id"`
-	Assistant   string `json:"assistant"`
-	Title       string `json:"title,omitempty"`
-	Messages    int    `json:"messages"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
+	ID        string `json:"id"`
+	AgentID   string `json:"agent_id"`
+	Agent     string `json:"agent"`
+	Title     string `json:"title,omitempty"`
+	Messages  int    `json:"messages"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 // Message is one stored turn. Content is kept verbatim; the model and usage
-// are recorded per message rather than per thread because an assistant's model
+// are recorded per message rather than per thread because an agent's model
 // can change between turns and the cost accounting must survive that.
 type Message struct {
 	ID        string `json:"id"`
@@ -33,7 +33,7 @@ type Message struct {
 	Completed int    `json:"completion_tokens,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
 
-	// ToolCalls is the raw JSON array an assistant turn asked for, stored as
+	// ToolCalls is the raw JSON array an agent turn asked for, stored as
 	// a string rather than a nested object: the store would normalise the
 	// object, and what has to survive here is exactly the bytes the provider
 	// will be shown again when this thread is resumed.
@@ -44,13 +44,13 @@ type Message struct {
 
 func threadFrom(r bkn.Record) Thread {
 	return Thread{
-		ID:          r.Str("id"),
-		AssistantID: r.Str("assistant_id"),
-		Assistant:   r.Str("assistant"),
-		Title:       r.Str("title"),
-		Messages:    int(r.Num("messages")),
-		CreatedAt:   r.Str("created_at"),
-		UpdatedAt:   r.Str("updated_at"),
+		ID:        r.Str("id"),
+		AgentID:   r.Str("agent_id"),
+		Agent:     r.Str("agent"),
+		Title:     r.Str("title"),
+		Messages:  int(r.Num("messages")),
+		CreatedAt: r.Str("created_at"),
+		UpdatedAt: r.Str("updated_at"),
 	}
 }
 
@@ -72,14 +72,14 @@ func messageFrom(r bkn.Record) Message {
 	}
 }
 
-// CreateThread opens a conversation against an assistant.
-func (h *Hub) CreateThread(a Assistant, title string) (Thread, error) {
+// CreateThread opens a conversation against an agent.
+func (h *Hub) CreateThread(a Agent, title string) (Thread, error) {
 	doc := map[string]any{
-		"assistant_id": a.ID,
-		"assistant":    a.Name,
-		"messages":     0,
-		"created_at":   now(),
-		"updated_at":   now(),
+		"agent_id":   a.ID,
+		"agent":      a.Name,
+		"messages":   0,
+		"created_at": now(),
+		"updated_at": now(),
 	}
 	if title != "" {
 		doc["title"] = title
@@ -92,11 +92,11 @@ func (h *Hub) CreateThread(a Assistant, title string) (Thread, error) {
 }
 
 // ListThreads returns the caller's threads, most recently updated first.
-func (h *Hub) ListThreads(assistant string, limit int) ([]Thread, error) {
+func (h *Hub) ListThreads(agent string, limit int) ([]Thread, error) {
 	q := url.Values{}
 	q.Set("order_by", "updated_at")
-	if assistant != "" {
-		q.Set("assistant", assistant)
+	if agent != "" {
+		q.Set("agent", agent)
 	}
 	if limit > 0 {
 		q.Set("limit", fmt.Sprint(limit))
@@ -125,7 +125,7 @@ func (h *Hub) GetThread(id string) (Thread, error) {
 //
 // It sorts on seq, not created_at: two messages written in the same
 // millisecond by the same turn would otherwise be free to come back in either
-// order, and a swapped user/assistant pair silently corrupts every later turn
+// order, and a swapped user/agent pair silently corrupts every later turn
 // of the conversation.
 func (h *Hub) History(threadID string, limit int) ([]Message, error) {
 	q := url.Values{}

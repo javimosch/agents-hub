@@ -1,6 +1,6 @@
 // Package bkn is the HTTP client for a bkn backend core.
 //
-// agents-hub stores nothing itself. Assistants, threads and messages are
+// agents-hub stores nothing itself. Agents, threads and messages are
 // documents in bkn collections, identity is bkn auth, and tenancy is enforced
 // by the collection's declared access policy rather than by filters this
 // package remembers to add. That is the point of the split: a bug here cannot

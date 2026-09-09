@@ -10,7 +10,7 @@ func toolCmd(fl *flags) {
 	switch fl.arg(0) {
 	case "", "list", "ls":
 		out.Data(map[string]any{"tools": hub.ToolCatalog(),
-			"note": "tools are opt-in per assistant or per call; a tool that writes also needs --allow-writes"})
+			"note": "tools are opt-in per agent or per call; a tool that writes also needs --allow-writes"})
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command", "tool takes list")
 	}

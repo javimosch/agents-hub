@@ -12,16 +12,16 @@ import (
 
 // Turn is everything one exchange produced.
 type Turn struct {
-	Thread    Thread         `json:"thread"`
-	User      Message        `json:"user_message"`
-	Assistant Message        `json:"assistant_message"`
-	Model     string         `json:"model"`
-	Usage     provider.Usage `json:"usage"`
-	Finish    string         `json:"finish_reason,omitempty"`
-	Memory    *memory.Block  `json:"memory,omitempty"`
-	Skills    *SkillReport   `json:"skills,omitempty"`
-	Steps     int            `json:"steps,omitempty"`
-	ToolRuns  []ToolRun      `json:"tool_runs,omitempty"`
+	Thread   Thread         `json:"thread"`
+	User     Message        `json:"user_message"`
+	Reply    Message        `json:"reply"`
+	Model    string         `json:"model"`
+	Usage    provider.Usage `json:"usage"`
+	Finish   string         `json:"finish_reason,omitempty"`
+	Memory   *memory.Block  `json:"memory,omitempty"`
+	Skills   *SkillReport   `json:"skills,omitempty"`
+	Steps    int            `json:"steps,omitempty"`
+	ToolRuns []ToolRun      `json:"tool_runs,omitempty"`
 }
 
 // ToolRun is one executed tool call, reported so an agent can see what the
@@ -45,9 +45,9 @@ type SkillReport struct {
 
 // ChatOptions is one call to Chat.
 type ChatOptions struct {
-	Assistant Assistant
-	Thread    *Thread // nil opens a new one
-	Message   string
+	Agent   Agent
+	Thread  *Thread // nil opens a new one
+	Message string
 	// HistoryLimit caps how many prior messages are replayed to the model. It
 	// is a blunt window, not compaction: a real compaction strategy belongs in
 	// the agentic engine, and pretending a truncated head is a summary would
@@ -110,7 +110,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 
 	th := opts.Thread
 	if th == nil {
-		created, err := h.CreateThread(opts.Assistant, titleFrom(opts.Message))
+		created, err := h.CreateThread(opts.Agent, titleFrom(opts.Message))
 		if err != nil {
 			return nil, err
 		}
@@ -123,14 +123,14 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 	}
 
 	msgs := make([]provider.Message, 0, len(history)+3)
-	if opts.Assistant.System != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Assistant.System})
+	if opts.Agent.System != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
 	}
 	block, err := recallFor(opts)
 	if err != nil {
 		return nil, err
 	}
-	// The memory block sits after the assistant's own instructions and before
+	// The memory block sits after the agent's own instructions and before
 	// the conversation: the prompt still outranks it, and it is not mistaken
 	// for something the user said.
 	if block != nil && block.Text != "" {
@@ -176,10 +176,10 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 
 	for step := 1; ; step++ {
 		resp, err := p.Chat(ctx, provider.Request{
-			Model:       opts.Assistant.Model,
+			Model:       opts.Agent.Model,
 			Messages:    msgs,
-			Temperature: opts.Assistant.Temperature,
-			MaxTokens:   opts.Assistant.MaxTokens,
+			Temperature: opts.Agent.Temperature,
+			MaxTokens:   opts.Agent.MaxTokens,
 			Tools:       specs,
 		}, opts.OnDelta)
 		if err != nil {
@@ -188,7 +188,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		turn.Steps = step
 		model := resp.Model
 		if model == "" {
-			model = opts.Assistant.Model
+			model = opts.Agent.Model
 		}
 		turn.Model = model
 		// Usage accumulates across the loop. Reporting only the last call
@@ -198,7 +198,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		turn.Usage.TotalTokens += resp.Usage.TotalTokens
 		turn.Finish = resp.FinishReason
 
-		// The assistant turn is stored whether it answered or asked for work,
+		// The agent turn is stored whether it answered or asked for work,
 		// so a resumed thread replays the tool calls that a later tool result
 		// refers to. A provider rejects an orphaned tool result outright.
 		calls := ""
@@ -226,7 +226,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		})
 
 		if len(resp.ToolCalls) == 0 {
-			turn.Assistant = asstMsg
+			turn.Reply = asstMsg
 			return turn, nil
 		}
 		if opts.Tools == nil {
@@ -238,8 +238,8 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		if step >= maxSteps {
 			// The cap is a budget, so hitting it is reported rather than
 			// smoothed over: finish_reason says max_steps and the last
-			// assistant turn is whatever the model had produced.
-			turn.Assistant = asstMsg
+			// agent turn is whatever the model had produced.
+			turn.Reply = asstMsg
 			turn.Finish = "max_steps"
 			return turn, nil
 		}
@@ -343,7 +343,7 @@ func toProvider(m Message) provider.Message {
 // loadSkills resolves each named skill through memgraph and reads its file.
 func loadSkills(opts ChatOptions) (*SkillReport, string, error) {
 	so := opts.Skills
-	names := append([]string{}, opts.Assistant.Skills...)
+	names := append([]string{}, opts.Agent.Skills...)
 	if so != nil {
 		names = append(names, so.Names...)
 	}
@@ -379,7 +379,7 @@ func loadSkills(opts ChatOptions) (*SkillReport, string, error) {
 	return rep, text, nil
 }
 
-// dedupe keeps the first occurrence of each name. An assistant configured
+// dedupe keeps the first occurrence of each name. An agent configured
 // with a skill and then asked for it again on the command line should not
 // pay for it twice.
 func dedupe(in []string) []string {

@@ -84,7 +84,7 @@ func skillShow(fl *flags) {
 }
 
 // skillsFor decides which skills this turn loads.
-func skillsFor(fl *flags, a hub.Assistant) *hub.SkillOptions {
+func skillsFor(fl *flags, a hub.Agent) *hub.SkillOptions {
 	if fl.has("no-skills") {
 		return nil
 	}
@@ -95,7 +95,7 @@ func skillsFor(fl *flags, a hub.Assistant) *hub.SkillOptions {
 	c, err := memory.New(0)
 	if err != nil {
 		// Same rule as memory: explicit on the command line is an error,
-		// configured on the assistant degrades with a note on stderr.
+		// configured on the agent degrades with a note on stderr.
 		if len(named) > 0 {
 			out.Fail(out.NotFound, "memgraph_missing", err.Error(),
 				"install memgraph, point AHUB_MEMGRAPH at it, or pass --no-skills")
