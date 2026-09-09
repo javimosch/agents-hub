@@ -78,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares every collection" "10"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "11"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -621,7 +621,7 @@ done
 chk "no turn was lost to the window"  "0"       "$FAILED"
 chk "the thread was folded"           "True"    "$(a thread show "$LT" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["thread"].get("summary")))')"
 chk "and the fold is recorded"        "True"    "$(a thread show "$LT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["thread"].get("compacted_at_prompt",0) > 0)')"
-chk "the window was learned"          "2000"    "$(a config show | python3 -c 'import json,sys;print(json.load(sys.stdin)["config"]["model_limits"].get("learn-model"))')"
+chk "the window was learned into bkn" "2000"    "$(a model list | python3 -c 'import json,sys;print(next((m["context_limit"] for m in json.load(sys.stdin)["models"] if m["model"]=="learn-model"), None))')"
 reply_mode '{"reply":null}'
 
 # A window smaller than the fixed parts cannot be rescued, and says so rather
@@ -632,6 +632,44 @@ chk "an unfittable prompt is typed"   "85"      "$(code chat --agent toobig --me
 chk "and named"                       "prompt_too_large" "$(err_type)"
 chkin "with what would actually help" "system prompt" "$(errj error.suggestions.0)"
 ctx_mode '{"limit":0,"prompt_tokens":0}'
+
+# --- what belongs in bkn, and what does not ------------------------------
+# A context window is a fact about a MODEL, so it is shared through bkn and no
+# second machine has to pay for a refused call to learn it. An allowlist or a
+# credential is a policy of THIS machine and stays local.
+chk "an unknown model is not listed"  "False"   "$(a model list | python3 -c 'import json,sys;print(any(m["model"]=="never-used-model" for m in json.load(sys.stdin)["models"]))')"
+chk "a window can be declared"        "declared" "$(a model set never-used-model=4096 | j source)"
+chk "and it is listed"                "4096"    "$(a model list | python3 -c 'import json,sys;print(next(m["context_limit"] for m in json.load(sys.stdin)["models"] if m["model"]=="never-used-model"))')"
+chk "declaring twice does not duplicate" "1"    "$(a model set never-used-model=8192 >/dev/null; a model list | python3 -c 'import json,sys;print(sum(1 for m in json.load(sys.stdin)["models"] if m["model"]=="never-used-model"))')"
+chk "the newer belief wins"           "8192"    "$(a model list | python3 -c 'import json,sys;print(next(m["context_limit"] for m in json.load(sys.stdin)["models"] if m["model"]=="never-used-model"))')"
+chk "it lives in bkn, not the profile" "True"   "$(python3 -c '
+import json,sys
+p = json.load(open(sys.argv[1]))["profiles"]["default"]
+print("never-used-model" not in (p.get("model_limits") or {}))' "$AHUB_CONFIG")"
+
+# A learned window is used without any local configuration.
+ctx_mode '{"limit":1500,"prompt_tokens":20}'
+reply_mode '{"reply":"notes: brief."}'
+a agent create --name shared --model shared-model --system short >/dev/null
+SPAD="$(python3 -c 'print("sentence that takes room. "*40)')"
+ST="$(a chat --agent shared --message first | j thread)"
+for i in $(seq 2 10); do a chat --agent shared --thread "$ST" --message "turn $i: $SPAD" >/dev/null 2>&1; done
+chk "a refused window is recorded in bkn" "True" "$(a model list | python3 -c 'import json,sys;print(any(m["model"]=="shared-model" and m["source"]=="learned" for m in json.load(sys.stdin)["models"]))')"
+reply_mode '{"reply":null}'
+ctx_mode '{"limit":0,"prompt_tokens":0}'
+
+# A job's output travels with its record, so a machine that did not run it can
+# still read what happened. The local file stays authoritative where it exists.
+JO="$(a job start --command seq --args 40 | j job.id)"
+a job wait "$JO" --timeout 20 >/dev/null
+chkin "output reads from the local file" "local file" "$(a job output "$JO" | j source)"
+chk "and a tail was recorded"          "True"    "$(a job show "$JO" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["job"].get("output_tail")))')"
+OF="$(a job show "$JO" | j job.output_file)"
+mv "$OF" "$OF.gone"
+chkin "without the file it reads the tail" "recorded tail" "$(a job output "$JO" | j source)"
+chkin "and the content is still there"  "40"     "$(a job output "$JO" | j output)"
+chk "the exit code was never local"    "0"       "$(a job show "$JO" | j job.exit_code)"
+mv "$OF.gone" "$OF"
 
 # --- evals -----------------------------------------------------------------
 # The measurement half. Without it every other change here is an opinion.

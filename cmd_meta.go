@@ -24,6 +24,7 @@ func helpJSON() {
 			"chat":      cmd([]string{"[message...]"}, []string{"--agent <n>", "--message <m>", "--thread <id>", "--model <m>", "--history <n>", "--stream", "--no-compact", "--compact-at <f>", "--memory-project <p>", "--memory-limit <n>", "--memory-chars <n>", "--memory-required", "--no-memory", "--skill <a,b>", "--skills-required", "--no-skills", "--tools <a,b>", "--allow-writes", "--max-steps <n>", "--no-tools"}, true),
 			"memory":    cmd([]string{"status|recall|save|read|projects", "[id-or-text]"}, []string{"--query <q>", "--text <t>", "--project <p>", "--type <t>", "--tags <a,b>", "--limit <n>", "--format index|full|paths", "--chars <n>"}, false),
 			"tool":      cmd([]string{"list"}, []string{}, false),
+			"model":     cmd([]string{"list|set", "[model=tokens]"}, []string{"--limit <n>"}, true),
 			"job":       cmd([]string{"list|show|output|wait|stop|start", "[job-id]"}, []string{"--command <prefix>", "--args <a> (repeatable)", "--timeout <s>", "--bytes <n>", "--status <s>"}, true),
 			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
 			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),

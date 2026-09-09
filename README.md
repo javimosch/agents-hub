@@ -36,7 +36,8 @@ ahub thread show 01M2...
 | schedule | a standing instruction to run an agent | `hub/schedules` |
 | thread | one conversation with one agent | `hub/threads` |
 | message | one turn, with its model and token counts | `hub/messages` |
-| profile | bkn url, token, provider, model | `~/.config/agents-hub/config.json` (0600) |
+| profile | bkn url, token, provider key, secrets, allowlists | `~/.config/agents-hub/config.json` (0600) |
+| model facts | context windows, learned or declared | `hub/models` |
 | memory | recalled notes, prepended as reference | a memgraph project |
 | skill | a `SKILL.md` procedure, loaded when named | memgraph's skill graph |
 
@@ -260,6 +261,38 @@ flow's `inputs` list, and `validate` reports anything else no step sets.
 targets, unreachable steps, variables nothing sets and commands this machine
 will refuse are all findable before a run spends a cent.
 
+## What lives where
+
+**bkn holds everything that should travel** — agents, threads, messages,
+flows, schedules, evals, jobs, and what has been learned about models. Log in
+on a new machine and it is all there:
+
+```sh
+ahub model list      # context windows every machine on the account shares
+```
+
+A window learned from one provider refusal is a window no other machine has to
+pay to discover. An explicit `--model-limit` in the profile is an override and
+still wins.
+
+**The profile holds what should not travel** — your token, provider key,
+secrets, and the three allowlists. A credential and a capability grant are
+policies of *one machine*, and a new machine must not inherit permission to run
+`sudo journalctl` merely because you logged in.
+
+**Job output is split deliberately.** The last 16 KB rides along with the
+record so another machine can read what happened; the full log stays where it
+ran, because a build log is not database content. `ahub job output` tells you
+which one you got:
+
+```json
+{"source": "local file (complete)"}      // on the machine that ran it
+{"source": "recorded tail (portable)"}   // anywhere else
+```
+
+**memgraph holds memories and skills** in its own store, by the earlier
+decision to prefer them over RAG.
+
 ## Output contract
 
 stdout is data, stderr is context, and the exit code says what to do next:
@@ -285,7 +318,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-314 assertions against a throwaway bkn, a real HTTP provider that echoes its
+326 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -457,7 +490,7 @@ bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha2
 Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
 if you'd rather not use bkn for it.
 
-## What v0.11 is not
+## What v0.13 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
 in 2026), no sub-agents, and no OpenAPI import yet — with `curl` allowlisted by

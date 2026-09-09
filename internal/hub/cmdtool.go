@@ -149,7 +149,7 @@ func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
 					return fmt.Sprintf("Job %s is still running after %ds. Do something else "+
 						"and call job_wait again.", j.ID, secs), nil
 				}
-				text, err := h.ReadOutput(j, maxCmdOutput)
+				text, _, err := h.ReadOutput(j, maxCmdOutput)
 				if err != nil {
 					return "", err
 				}
@@ -170,7 +170,7 @@ func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
 				if err != nil {
 					return "", err
 				}
-				text, err := h.ReadOutput(j, maxCmdOutput)
+				text, _, err := h.ReadOutput(j, maxCmdOutput)
 				if err != nil {
 					return "", err
 				}

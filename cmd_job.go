@@ -49,12 +49,15 @@ func jobShow(fl *flags) {
 func jobOutput(fl *flags) {
 	h, _ := hubFor(fl)
 	j := resolveJob(h, fl)
-	text, err := h.ReadOutput(j, fl.intVal("bytes", 8000))
+	text, local, err := h.ReadOutput(j, fl.intVal("bytes", 8000))
 	if err != nil {
 		out.Fail(out.InternalError, "internal_error", err.Error())
 	}
 	out.Data(map[string]any{"job": j.ID, "status": j.Status,
-		"exit_code": j.ExitCode, "output": text})
+		"exit_code": j.ExitCode, "output": text,
+		// Which copy this is, because "complete" and "portable" are not the
+		// same thing and a reader should not have to guess.
+		"source": sourceOf(local)})
 }
 
 func jobWait(fl *flags) {
@@ -64,9 +67,9 @@ func jobWait(fl *flags) {
 	if err != nil {
 		fail(err, "wait for job")
 	}
-	text, _ := h.ReadOutput(done, fl.intVal("bytes", 8000))
+	text, local, _ := h.ReadOutput(done, fl.intVal("bytes", 8000))
 	fields := map[string]any{"job": done.ID, "status": done.Status,
-		"exit_code": done.ExitCode, "output": text}
+		"exit_code": done.ExitCode, "output": text, "source": sourceOf(local)}
 	if !done.Done() {
 		// Still running is not a failure, but a caller must be able to tell
 		// "it finished" from "I stopped waiting" without reading the payload.
@@ -157,6 +160,12 @@ func finishJob(h *hub.Hub, j hub.Job, exitCode int, err error) {
 	if st, serr := os.Stat(j.Output); serr == nil {
 		fields["bytes"] = st.Size()
 	}
+	// The tail travels with the record so the job can be read from anywhere,
+	// which is the whole point of recording it in bkn rather than only on disk.
+	if tail, truncated, terr := hub.TailOf(j.Output); terr == nil && tail != "" {
+		fields["output_tail"] = tail
+		fields["output_truncated"] = truncated
+	}
 	if err != nil {
 		fields["status"] = hub.JobFailed
 		fields["error"] = err.Error()
@@ -181,6 +190,13 @@ func resolveJob(h *hub.Hub, fl *flags) hub.Job {
 		fail(err, "load job")
 	}
 	return j
+}
+
+func sourceOf(local bool) string {
+	if local {
+		return "local file (complete)"
+	}
+	return "recorded tail (portable)"
 }
 
 func nowRFC() string { return time.Now().UTC().Format(time.RFC3339Nano) }

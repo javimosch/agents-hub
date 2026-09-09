@@ -102,6 +102,10 @@
     {
       "command": "ahub job start --command 'gh pr list' && ahub job wait <id>",
       "why": "Work that outlives a turn. job list, job output and job stop are there too."
+    },
+    {
+      "command": "ahub model list",
+      "why": "Context windows, shared through bkn. One machine learns a window from a refused call and the rest already know it."
     }
   ],
   "concepts": [
@@ -200,6 +204,10 @@
     {
       "name": "privileged steps",
       "what": "Do not run ahub as root. Allowlist the privileged SHAPE instead: `--allow-cmd 'sudo journalctl'` permits journalctl as root and nothing else, because the allowlist matches whole-field prefixes. The real gate is the sudoers rule, which the OS enforces and audits; ahub's allowlist is the second one. For anything genuinely dangerous, put the work in a root-owned systemd unit and let the flow only start it -- then a compromised ahub can trigger one predefined action, not compose a new one."
+    },
+    {
+      "name": "what lives where",
+      "what": "bkn holds everything that should travel: agents, threads, flows, schedules, evals, jobs, and what has been learned about models. The local profile holds what should NOT travel -- your token, your provider key, your secrets, and the allowlists -- because a credential and a capability grant are policies of one machine, and a new machine must not inherit them by logging in. memgraph holds memories and skills in its own store."
     }
   ],
   "gotchas": [
@@ -246,7 +254,9 @@
     "When a prompt cannot be made to fit at all, the error is exit 85 prompt_too_large rather than a retryable provider error, because the same prompt will not fit next time either.",
     "A flow has no arithmetic. It can COMPARE numbers (gt/lt read the leading number, so `du -sb` output compares straight against a budget) but it cannot compute one. If you need a calculation, do it in the command.",
     "A conditional reads its variable by name, so an unset one compares as empty rather than failing the way a template does. Declare optional variables in the flow's `inputs` list; anything else that no step sets is reported by validate.",
-    "An allowlist entry is a whole-field prefix: 'sudo journalctl' permits `sudo journalctl --vacuum-size=250M` and refuses `sudo rm`. A one-word entry behaves as it always did, allowing any arguments -- which is why 'sudo' alone should never be one."
+    "An allowlist entry is a whole-field prefix: 'sudo journalctl' permits `sudo journalctl --vacuum-size=250M` and refuses `sudo rm`. A one-word entry behaves as it always did, allowing any arguments -- which is why 'sudo' alone should never be one.",
+    "A context window learned from a provider's refusal is written to bkn, not the profile: it is a fact about the model. An explicit --model-limit in the profile is an override and still wins.",
+    "A job's output tail (16 KB) is stored with its record so another machine can read it; the full log stays where it ran. `ahub job output` says which one you got -- \"local file (complete)\" or \"recorded tail (portable)\"."
   ],
   "recipes": [
     {

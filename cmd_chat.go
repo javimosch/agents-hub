@@ -77,7 +77,7 @@ func chatCmd(fl *flags) {
 		Memory:       memoryFor(fl, a),
 		Skills:       skillsFor(fl, a),
 		Tools:        toolsFor(fl, cfg, h, a),
-		Compact:      compactionFor(fl, cfg),
+		Compact:      compactionFor(fl, cfg, h),
 		MaxSteps:     fl.intVal("max-steps", 0),
 	}
 	if fl.stream {
@@ -215,11 +215,23 @@ func toolsFor(fl *flags, cfg Config, h *hub.Hub, a hub.Agent) *hub.Registry {
 // compactionFor builds the folding policy from the profile. It is on by
 // default: a thread that silently stops fitting is a worse surprise than one
 // that says it summarised itself, and --no-compact turns it off.
-func compactionFor(fl *flags, cfg Config) *hub.CompactPolicy {
+func compactionFor(fl *flags, cfg Config, h *hub.Hub) *hub.CompactPolicy {
 	if fl.has("no-compact") {
 		return nil
 	}
 	limits := map[string]int{}
+	// What has been learned comes first, and an explicit --model-limit in the
+	// profile overrides it: a number somebody typed on purpose beats one this
+	// tool inferred from an error message.
+	if h != nil {
+		if known, err := h.LoadModelLimits(); err == nil {
+			for k, v := range known {
+				limits[k] = v
+			}
+		} else {
+			out.Log("could not read known context windows: %v", err)
+		}
+	}
 	for k, v := range cfg.ModelLimits {
 		limits[k] = v
 	}
@@ -231,32 +243,23 @@ func compactionFor(fl *flags, cfg Config) *hub.CompactPolicy {
 	}
 	return &hub.CompactPolicy{
 		Limits: limits, At: at, Keep: fl.intVal("compact-keep", 4),
-		OnLearn: func(model string, limit int) { rememberLimit(fl, model, limit) },
+		OnLearn: func(model string, limit int) { rememberLimit(h, model, limit) },
 	}
 }
 
-// rememberLimit writes a window a provider named into the active profile, so
-// it is known before the next call rather than rediscovered by another
-// refusal. A failure to save is reported and ignored: the turn in flight has
-// the number it needs.
-func rememberLimit(fl *flags, model string, limit int) {
-	f, err := loadFile()
-	if err != nil {
-		out.Log("learned %s = %d tokens but could not save it: %v", model, limit, err)
+// rememberLimit records a window a provider named.
+//
+// It goes to bkn rather than to the local profile, because it is a fact about
+// the model rather than a policy of this machine -- so the next machine to
+// use that model already knows, instead of rediscovering it by paying for
+// another refused call. A failure to save is reported and ignored: the turn in
+// flight already has the number it needs.
+func rememberLimit(h *hub.Hub, model string, limit int) {
+	if h == nil {
 		return
 	}
-	name := profileName(fl, f)
-	p := f.Profiles[name]
-	if p.ModelLimits == nil {
-		p.ModelLimits = map[string]int{}
-	}
-	if p.ModelLimits[model] == limit {
-		return
-	}
-	p.ModelLimits[model] = limit
-	f.Profiles[name] = p
-	if err := saveFile(f); err != nil {
-		out.Log("learned %s = %d tokens but could not save it: %v", model, limit, err)
+	if err := h.SaveModelLimit(model, limit, "learned"); err != nil {
+		out.Log("learned %s = %d tokens but could not record it: %v", model, limit, err)
 		return
 	}
 	out.Log("learned that %s has a %d-token context window", model, limit)

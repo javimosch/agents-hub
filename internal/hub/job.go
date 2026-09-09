@@ -42,7 +42,13 @@ type Job struct {
 	ExitCode int      `json:"exit_code"`
 	Output   string   `json:"output_file,omitempty"`
 	Bytes    int      `json:"bytes,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	// Tail is the last of the output, stored with the record so a job can be
+	// read from a machine that did not run it. The full log stays on the
+	// machine that produced it: a build log can be tens of megabytes, and a
+	// database is the wrong place for it. What travels is what you look at.
+	Tail      string `json:"output_tail,omitempty"`
+	Truncated bool   `json:"output_truncated,omitempty"`
+	Error     string `json:"error,omitempty"`
 	// Thread and Agent record who started it, so a job found later can be
 	// traced back to the conversation that wanted it.
 	Thread     string `json:"thread,omitempty"`
@@ -115,6 +121,7 @@ func jobFrom(r bkn.Record) Job {
 		ID: r.Str("id"), Command: r.Str("command"), Status: r.Str("status"),
 		PID: int(r.Num("pid")), ExitCode: int(r.Num("exit_code")),
 		Output: r.Str("output_file"), Bytes: int(r.Num("bytes")),
+		Tail: r.Str("output_tail"), Truncated: r["output_truncated"] == true,
 		Error: r.Str("error"), Thread: r.Str("thread"), Agent: r.Str("agent"),
 		StartedAt: r.Str("started_at"), FinishedAt: r.Str("finished_at"),
 	}
@@ -233,23 +240,51 @@ func StartJob(h *Hub, allowed []string, j Job, extra []string) (Job, error) {
 	return h.Spawn(created)
 }
 
-// ReadOutput returns the tail of a job's captured output.
-func (h *Hub) ReadOutput(j Job, maxBytes int) (string, error) {
-	if j.Output == "" {
-		return "", nil
+// MaxTail is how much of a job's output rides along with its record.
+const MaxTail = 16 << 10
+
+// ReadOutput returns a job's output, preferring the local file.
+//
+// The local file is complete; the stored tail is merely portable. Reading a
+// job on the machine that ran it should not silently give you less than
+// reading it there would, so the file wins whenever it is present -- and the
+// caller is told which one it got.
+func (h *Hub) ReadOutput(j Job, maxBytes int) (text string, local bool, err error) {
+	if j.Output != "" {
+		data, rerr := os.ReadFile(j.Output)
+		if rerr == nil {
+			if maxBytes > 0 && len(data) > maxBytes {
+				// The tail, not the head: the end of a log is where the
+				// failure is.
+				return "[...truncated]\n" + string(data[len(data)-maxBytes:]), true, nil
+			}
+			return string(data), true, nil
+		}
+		if !os.IsNotExist(rerr) {
+			return "", false, rerr
+		}
 	}
-	data, err := os.ReadFile(j.Output)
+	// No file here: either another machine ran it, or the file has been
+	// cleaned up. The recorded tail is what is left.
+	if j.Truncated && j.Tail != "" {
+		return "[...truncated; the full log is on the machine that ran this job]\n" + j.Tail, false, nil
+	}
+	return j.Tail, false, nil
+}
+
+// TailOf reads the last MaxTail bytes of a file, for storing with a record.
+func TailOf(path string) (tail string, truncated bool, err error) {
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return "", nil
+		return "", false, nil
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if maxBytes > 0 && len(data) > maxBytes {
-		// The tail, not the head: the end of a log is where the failure is.
-		return "[...truncated]\n" + string(data[len(data)-maxBytes:]), nil
+	if len(data) > MaxTail {
+		return string(data[len(data)-MaxTail:]), true, nil
 	}
-	return string(data), nil
+	return string(data), false, nil
 }
 
 // StopJob signals a running job.

@@ -187,7 +187,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 		out.Fail(out.InvalidValue, "invalid_value", err.Error())
 	}
 	opts := hub.RunScheduleOptions{Schedule: a, Provider: p, Trigger: trigger,
-		Compact: compactionFor(fl, cfg)}
+		Compact: compactionFor(fl, cfg, h)}
 
 	// memgraph is needed only if this agent asked for tools, skills or a
 	// memory project. An agent that asked for none must still run on a

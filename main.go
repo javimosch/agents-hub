@@ -65,6 +65,8 @@ func main() {
 		evalCmd(fl)
 	case "job":
 		jobCmd(fl)
+	case "model":
+		modelCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -185,6 +187,7 @@ func usage() {
 
   ahub skill search <q> | recommend <task> | show <name>
   ahub tool list                                   what a model may be given
+  ahub model list|set <m>=<tokens>                 context windows, shared via bkn
 
   ahub flow validate --file <f.json>               check a path before running it
   ahub flow create --file <f.json>                 store it
