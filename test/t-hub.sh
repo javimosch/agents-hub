@@ -58,13 +58,16 @@ export AHUB_PROVIDER_URL="$P"
 export AHUB_PROVIDER_KEY="not-checked"
 a() { "$AHUB" "$@" 2>"$WORK/err"; }
 code() { "$AHUB" "$@" >"$WORK/out" 2>"$WORK/err"; echo $?; }
-err_type() { j error.type <"$WORK/err"; }
+# stderr may carry context lines before the error object (the spec allows it),
+# so the harness reads the last line rather than the whole file.
+errj() { tail -1 "$WORK/err" | j "$1"; }
+err_type() { errj error.type; }
 
 echo "== agents-hub live suite (bkn :$BKN_PORT, provider :$PROV_PORT) =="
 
 # --- introspection works with no backend at all ----------------------------
 chk "help-json lists chat"            "chat"    "$("$AHUB" help-json | python3 -c 'import json,sys;print("chat" if "chat" in json.load(sys.stdin)["commands"] else "no")')"
-chk "help-json carries exit code 105" "model provider or memgraph failed, or the turn was interrupted" "$("$AHUB" help-json | j exit_codes.105)"
+chk "help-json carries exit code 105" "model provider, memgraph or a flow step failed, or the turn was interrupted" "$("$AHUB" help-json | j exit_codes.105)"
 chk "guide is machine-readable"       "ahub"    "$("$AHUB" guide | j tool)"
 chk "unknown command exits 80"        "80"      "$(code frobnicate)"
 chk "unknown command is typed"        "unknown_command" "$(err_type)"
@@ -75,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares 3 collections"    "3"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "5"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -131,7 +134,7 @@ chkin "streamed content is assembled" "echo=stream me" "$(printf '%s' "$S" | tai
 curl -sf -X POST "$P/control/fail" -d '{"fail":true}' >/dev/null
 chk "provider failure exits 105"      "105"     "$(code chat --assistant helper --thread "$TID" --message boom)"
 chk "provider failure is typed"       "provider_error" "$(err_type)"
-chk "provider failure is recoverable" "True"    "$(j error.recoverable <"$WORK/err")"
+chk "provider failure is recoverable" "True"    "$(errj error.recoverable)"
 chk "the question survived the failure" "5"     "$(a thread show "$TID" | j count)"
 chk "the stored question is the failed one" "boom" "$(a thread show "$TID" | j messages.4.content)"
 chk "the thread count stays honest"   "5"       "$(a thread show "$TID" | j thread.messages)"
@@ -223,7 +226,7 @@ chk "--skills-required makes it fatal" "92"     "$(code chat --assistant skilled
 # A skill whose file is not markdown is refused, wherever the path came from.
 # 85, not 105: this tool refused the path, memgraph did not fail.
 chk "a non-markdown skill is refused" "85"      "$(FAKE_SKILL_BADPATH=1 code skill show bad-skill)"
-chkin "and it says why"               "not markdown" "$(j error.message <"$WORK/err")"
+chkin "and it says why"               "not markdown" "$(errj error.message)"
 
 # --- tools -----------------------------------------------------------------
 # The fake model asks for one tool, then answers with the result in its
@@ -231,9 +234,9 @@ chkin "and it says why"               "not markdown" "$(j error.message <"$WORK/
 chk "the catalog needs nothing"       "4"       "$("$AHUB" tool list | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tools"]))')"
 chk "the catalog marks what writes"   "memory_save" "$("$AHUB" tool list | python3 -c 'import json,sys;print(",".join(t["name"] for t in json.load(sys.stdin)["tools"] if t["writes"]))')"
 chk "an unknown tool is refused"      "85"      "$(code chat --assistant helper --tools no_such_tool --message x)"
-chkin "and it lists the real ones"    "memory_recall" "$(j error.message <"$WORK/err")"
+chkin "and it lists the real ones"    "memory_recall" "$(errj error.message)"
 chk "a writing tool needs consent"    "85"      "$(code chat --assistant helper --tools memory_save --message x)"
-chkin "and it says which flag"        "--allow-writes" "$(j error.message <"$WORK/err")"
+chkin "and it says which flag"        "--allow-writes" "$(errj error.message)"
 chk "consent enables it"              "True"    "$(a chat --assistant helper --tools memory_save --allow-writes --message x | j ok)"
 
 T1="$(a chat --assistant helper --tools memory_recall --message "how do I release a port")"
@@ -265,7 +268,7 @@ chk "and the failure is reported"     "True"    "$(FAKE_MEMGRAPH_FAIL=1 a chat -
 # answer: ok:true with an empty string is the worst thing to hand an agent.
 chk "max-steps without an answer fails" "105"   "$(code chat --assistant helper --tools memory_recall --max-steps 1 --message x)"
 chk "and it is typed"                 "max_steps_exhausted" "$(err_type)"
-chkin "and it says how to resume"     "--max-steps 20" "$(j error.suggestions.0 <"$WORK/err")"
+chkin "and it says how to resume"     "--max-steps 20" "$(errj error.suggestions.0)"
 
 # A tool called with a missing required parameter is told which one, rather
 # than being handed whatever error an empty string produces downstream.
@@ -291,6 +294,133 @@ a assistant create --name tooled --model m1 --system sys --tools memory_recall,s
 chk "a configured tool set is used"   "2"       "$(a chat --assistant tooled --message x | j steps)"
 chk "--no-tools wins"                 "1"       "$(a chat --assistant tooled --no-tools --message x | j steps)"
 chk "a turn without tools is one step" "1"      "$(a chat --assistant helper --message x | j steps)"
+
+# --- flows -----------------------------------------------------------------
+# The deterministic half. The claim being tested is not that flows work but
+# that they are free: a wizard that collects, branches and shells out must
+# report zero llm_calls and zero tokens.
+a config set --allow-cmd echo --allow-host 127.0.0.1 --secret TOK=hunter2 >/dev/null
+
+cat > "$WORK/wizard.json" <<'FLOW'
+{
+  "name": "wizard",
+  "start": "who",
+  "steps": {
+    "who":   {"type":"collect_input","var":"who","prompt":"Your name?","required":true,"next":"greet"},
+    "greet": {"type":"cmd","command":"echo","args":["hello {{who}}"],"var":"line","next":"branch"},
+    "branch":{"type":"conditional","when":[{"var":"who","op":"eq","value":"vip","next":"gold"}],"else":"std"},
+    "gold":  {"type":"message","text":"VIP: {{line}}","next":"done"},
+    "std":   {"type":"message","text":"Standard: {{line}}","next":"done"},
+    "done":  {"type":"end"}
+  }
+}
+FLOW
+chk "validate accepts a good flow"    "True"    "$(a flow validate --file "$WORK/wizard.json" | j valid)"
+chk "validate reads stdin too"        "True"    "$(a flow validate < "$WORK/wizard.json" | j valid)"
+chk "create stores it"                "wizard"  "$(a flow create --file "$WORK/wizard.json" | j flow.name)"
+chk "it is listed"                    "wizard"  "$(a flow list | j flows.0.name)"
+chk "show returns the definition"     "who"     "$(a flow show wizard | j flow.start)"
+
+# A structural mistake is fatal; a machine-local one is a warning, because a
+# definition must stay storable on a machine that cannot run it.
+cat > "$WORK/broken.json" <<'FLOW'
+{"name":"broken","start":"a","steps":{
+  "a":{"type":"cmd","command":"nosuchtool","args":[],"var":"o","next":"ghost"},
+  "b":{"type":"message","text":"{{never}}","next":"a"}}}
+FLOW
+chk "a broken flow is refused"        "82"      "$(code flow validate --file "$WORK/broken.json")"
+chk "and it is typed"                 "invalid_flow" "$(err_type)"
+chkin "the missing target is named"   "does not exist" "$(errj error.message)"
+chkin "the unlisted command warns"    "not allowed on this machine" "$(errj error.message)"
+chk "a broken flow cannot be stored"  "82"      "$(code flow create --file "$WORK/broken.json")"
+
+# Running: pauses for input rather than prompting, because this tool never
+# blocks on a terminal that may not exist.
+chk "a run pauses for input"          "92"      "$(code flow run wizard)"
+chk "and it is typed"                 "needs_input" "$(err_type)"
+chkin "it says what it needs"         "needs who" "$(errj error.message)"
+chkin "and how to continue"           "flow resume" "$(errj error.suggestions.0)"
+RUN="$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["run"])')"
+chk "the paused run is stored"        "paused"  "$(a flow runs --limit 1 | j runs.0.status)"
+RES="$(a flow resume "$RUN" --input who=vip)"
+chk "resume completes it"             "completed" "$(printf '%s' "$RES" | j status)"
+chkin "the right branch was taken"    "VIP: hello vip" "$(printf '%s' "$RES" | j messages.0)"
+chk "resuming a finished run is a conflict" "95" "$(code flow resume "$RUN" --input who=x)"
+
+# The whole argument for the feature, asserted rather than claimed.
+DET="$(a flow run wizard --input who=ada)"
+chk "a deterministic run is free"     "0"       "$(printf '%s' "$DET" | j llm_calls)"
+chk "and spends no tokens"            "0"       "$(printf '%s' "$DET" | j tokens)"
+chk "and still did the work"          "5"       "$(printf '%s' "$DET" | j steps)"
+
+# argv, not a shell line: the same guarantee as the memgraph wrapper.
+cat > "$WORK/shell.json" <<'FLOW'
+{"name":"shelltest","start":"a","steps":{
+  "a":{"type":"cmd","command":"echo","args":["{{payload}}"],"var":"out","next":"b"},
+  "b":{"type":"message","text":"got {{out}}","next":"c"},
+  "c":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/shell.json" >/dev/null
+SH_OUT="$(a flow run shelltest --input 'payload=x; touch /tmp/flow-pwned; echo y')"
+chkin "a command is argv, not a shell line" "x; touch /tmp/flow-pwned; echo y" "$(printf '%s' "$SH_OUT" | j data.out)"
+chk "nothing was executed"            "False"   "$([ -e /tmp/flow-pwned ] && echo True || echo False)"
+
+# A command that is not allowed here fails the run, wherever the flow came from.
+a config set --deny-cmd echo >/dev/null
+chk "an unlisted command fails the run" "105"   "$(code flow run shelltest --input payload=hi)"
+chkin "and says how to allow it"      "--allow-cmd echo" "$(errj error.message)"
+a config set --allow-cmd echo >/dev/null
+
+# http, against the local bkn: allowlisted host, real request, JSON select.
+cat > "$WORK/http.json" <<FLOW
+{"name":"probe","start":"a","steps":{
+  "a":{"type":"http","method":"GET","url":"$B/_health","var":"health","parse":"json","select":"ok","next":"b","on_error":"down"},
+  "b":{"type":"message","text":"bkn ok={{health}} status={{health_code}}","next":"end_ok"},
+  "down":{"type":"message","text":"bkn down: {{health_err}}","next":"end_bad"},
+  "end_ok":{"type":"end"},
+  "end_bad":{"type":"end","status":"failed"}}}
+FLOW
+a flow create --file "$WORK/http.json" >/dev/null
+HP="$(a flow run probe)"
+chk "an http step runs"               "completed" "$(printf '%s' "$HP" | j status)"
+chk "and selects a field"             "true"    "$(printf '%s' "$HP" | j data.health)"
+chk "and records the status code"     "200"     "$(printf '%s' "$HP" | j data.health_code)"
+chk "an http run is also free"        "0"       "$(printf '%s' "$HP" | j tokens)"
+
+cat > "$WORK/badhost.json" <<'FLOW'
+{"name":"badhost","start":"a","steps":{
+  "a":{"type":"http","url":"https://example.com/","var":"o","next":"b"},
+  "b":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/badhost.json" >/dev/null
+chk "an unlisted host fails the run"  "105"     "$(code flow run badhost)"
+chkin "and says how to allow it"      "--allow-host example.com" "$(errj error.message)"
+
+# A secret is referenced by name, never stored in the definition or the run.
+cat > "$WORK/secret.json" <<FLOW
+{"name":"secretflow","start":"a","steps":{
+  "a":{"type":"http","method":"GET","url":"$B/_health","headers":{"X-Test":"Bearer {{secret.TOK}}"},"var":"o","next":"b"},
+  "b":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/secret.json" >/dev/null
+chk "a flow using a secret runs"      "completed" "$(a flow run secretflow | j status)"
+chk "the secret is not in the run"    "False"   "$(a flow run secretflow | grep -c hunter2 | sed 's/^0$/False/;s/^[1-9].*/True/')"
+chk "config lists secrets by name only" "TOK"   "$(a config show | j config.secrets.0)"
+chk "and never their values"          "False"   "$(a config show | grep -c hunter2 | sed 's/^0$/False/;s/^[1-9].*/True/')"
+
+# The one step that costs money, wired to a real assistant and thread.
+cat > "$WORK/ask.json" <<'FLOW'
+{"name":"askflow","start":"a","steps":{
+  "a":{"type":"ask","assistant":"helper","prompt":"summarise: {{topic}}","var":"answer","next":"b"},
+  "b":{"type":"message","text":"said {{answer}}","next":"c"},
+  "c":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/ask.json" >/dev/null
+AK="$(a flow run askflow --input topic=ports)"
+chk "an ask step calls the model"     "1"       "$(printf '%s' "$AK" | j llm_calls)"
+chk "and counts its tokens"           "True"    "$(printf '%s' "$AK" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tokens"] > 0)')"
+chkin "and the answer is a variable"  "said turns=" "$(printf '%s' "$AK" | j messages.0)"
+chk "the LLM turn is stored as a thread" "True" "$(printf '%s' "$AK" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(bool(d["data"].get("answer")))')"
 
 # --- token refresh ---------------------------------------------------------
 # A bkn access token is a 15-minute JWT. An agent must not have to notice.
@@ -328,7 +458,7 @@ chk "the assistant is still there"     "helper"  "$(a assistant get "$AID" | j a
 kill "$BKN_PID" 2>/dev/null; wait "$BKN_PID" 2>/dev/null
 chk "bkn down exits 100"              "100"     "$(code assistant list)"
 chk "bkn down is typed"               "connection_error" "$(err_type)"
-chk "bkn down is recoverable"         "True"    "$(j error.recoverable <"$WORK/err")"
+chk "bkn down is recoverable"         "True"    "$(errj error.recoverable)"
 BKN_PID=""
 
 echo

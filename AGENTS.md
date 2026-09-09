@@ -17,6 +17,7 @@ the question "what would this cost us at deploy time?".
 | `main.go`, `cmd_*.go`, `flags.go`, `config.go` | the CLI surface |
 | `internal/hub` | the domain: assistants, threads, messages, the chat turn, the tool loop |
 | `internal/memory` | the memgraph wrapper: recall, skills, and the rules that keep it safe |
+| `internal/flow` | the deterministic engine: definition, validator, templating, steps |
 | `internal/bkn` | HTTP client for the backend; the only place that knows bkn's wire shapes |
 | `internal/provider` | the model layer: one interface, one OpenAI-compatible impl |
 | `internal/out` | cli-output-spec plumbing (a deliberate copy of bkn's) |
@@ -46,6 +47,11 @@ repo runs on.
   stored, resumable thread plus an exit code.
 - **Anything that writes needs a second gate.** Naming a tool enables it;
   `--allow-writes` is what permits mutation.
+- **Capability lists live in the operator's profile, never in content.** A
+  flow definition, a tool argument and a model's output are all data. Data
+  never names what may be executed or reached.
+- **A flow step never prompts.** If it needs something it does not have, it
+  pauses and exits 92. Nothing in this tool may block on a terminal.
 
 ## Before committing
 

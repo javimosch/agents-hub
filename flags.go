@@ -19,11 +19,15 @@ type flags struct {
 	stream      bool
 	rest        []string
 	kv          map[string]string
-	bools       map[string]bool
+	// multi keeps every occurrence of a repeated flag. kv keeps the last, so
+	// a command that wants one value is unaffected by a caller that passed
+	// several, and a command that wants them all can have them.
+	multi map[string][]string
+	bools map[string]bool
 }
 
 func newFlags() *flags {
-	return &flags{kv: map[string]string{}, bools: map[string]bool{}}
+	return &flags{kv: map[string]string{}, multi: map[string][]string{}, bools: map[string]bool{}}
 }
 
 // parse splits argv into global flags, command-specific key/values, boolean
@@ -72,9 +76,13 @@ func parse(argv []string) *flags {
 			continue
 		}
 		f.kv[name] = val
+		f.multi[name] = append(f.multi[name], val)
 	}
 	return f
 }
+
+// list returns every value given for a repeated flag.
+func (f *flags) list(k string) []string { return f.multi[k] }
 
 func (f *flags) arg(i int) string {
 	if i < len(f.rest) {

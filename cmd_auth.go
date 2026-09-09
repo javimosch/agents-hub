@@ -1,6 +1,9 @@
 package main
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/javimosch/agents-hub/internal/bkn"
 	"github.com/javimosch/agents-hub/internal/hub"
 	"github.com/javimosch/agents-hub/internal/out"
@@ -108,6 +111,10 @@ func configCmd(fl *flags) {
 				"provider_url": cfg.ProviderURL, "model": cfg.Model,
 				"timeout_secs": cfg.TimeoutSecs, "provider_timeout_secs": cfg.ProviderTimeoutSecs,
 				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
+				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
+				// Names only. A secret printed to stdout is a secret in every
+				// log that captured the command.
+				"secrets": secretNames(cfg),
 			},
 		})
 	case "set-profile":
@@ -162,11 +169,72 @@ func applyConfigSet(fl *flags, p *Config) []string {
 		p.TimeoutSecs = n
 		changed = append(changed, "timeout_secs")
 	}
+	for _, c := range fl.list("allow-cmd") {
+		if !contains(p.AllowCmds, c) {
+			p.AllowCmds = append(p.AllowCmds, c)
+			changed = append(changed, "allow_cmds")
+		}
+	}
+	for _, hst := range fl.list("allow-host") {
+		if !contains(p.AllowHosts, hst) {
+			p.AllowHosts = append(p.AllowHosts, hst)
+			changed = append(changed, "allow_hosts")
+		}
+	}
+	for _, s := range fl.list("secret") {
+		k, v, ok := strings.Cut(s, "=")
+		if !ok {
+			out.Fail(out.InvalidValue, "invalid_value", "--secret takes NAME=value")
+		}
+		if p.Secrets == nil {
+			p.Secrets = map[string]string{}
+		}
+		p.Secrets[k] = v
+		changed = append(changed, "secrets")
+	}
+	for _, c := range fl.list("deny-cmd") {
+		p.AllowCmds = without(p.AllowCmds, c)
+		changed = append(changed, "allow_cmds")
+	}
+	for _, hst := range fl.list("deny-host") {
+		p.AllowHosts = without(p.AllowHosts, hst)
+		changed = append(changed, "allow_hosts")
+	}
 	if n := fl.intVal("provider-timeout", 0); n > 0 {
 		p.ProviderTimeoutSecs = n
 		changed = append(changed, "provider_timeout_secs")
 	}
 	return changed
+}
+
+// secretNames lists which secrets exist without revealing any of them: a
+// value printed to stdout is a value in every log that captured the command.
+func secretNames(c Config) []string {
+	names := make([]string, 0, len(c.Secrets))
+	for n := range c.Secrets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func without(list []string, s string) []string {
+	out := list[:0]
+	for _, v := range list {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func profileNames(f File) []string {

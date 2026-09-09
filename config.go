@@ -30,6 +30,17 @@ type Config struct {
 	// and one shared number means either bkn hangs too long or generation is
 	// cut off mid-answer.
 	ProviderTimeoutSecs int `json:"provider_timeout_secs,omitempty"`
+
+	// AllowCmds and AllowHosts are what a flow step may reach on this
+	// machine. They live here, in a file the operator owns, and never in a
+	// flow definition: a flow is data -- possibly data a model wrote -- and a
+	// flow that could name its own executables would be arbitrary code
+	// execution with extra steps.
+	AllowCmds  []string `json:"allow_cmds,omitempty"`
+	AllowHosts []string `json:"allow_hosts,omitempty"`
+	// Secrets are referenced from a flow as {{secret.NAME}} and never stored
+	// in one, so a definition can be shared without its credentials.
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 // File is the on-disk shape: named profiles plus which one is active.

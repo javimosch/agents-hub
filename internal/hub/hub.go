@@ -18,7 +18,9 @@ const (
 )
 
 // Refs lists every collection the hub owns, in declare order.
-func Refs() []string { return []string{RefAssistants, RefThreads, RefMessages} }
+func Refs() []string {
+	return []string{RefAssistants, RefThreads, RefMessages, RefFlows, RefFlowRuns}
+}
 
 // Hub is the domain bound to one bkn client (and therefore one identity).
 type Hub struct{ C *bkn.Client }

@@ -56,6 +56,8 @@ func main() {
 		skillCmd(fl)
 	case "tool":
 		toolCmd(fl)
+	case "flow":
+		flowCmd(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"unknown command: "+cmd, "ahub help-json", "ahub guide")
@@ -160,6 +162,12 @@ func usage() {
 
   ahub skill search <q> | recommend <task> | show <name>
   ahub tool list                                   what a model may be given
+
+  ahub flow validate --file <f.json>               check a path before running it
+  ahub flow create --file <f.json>                 store it
+  ahub flow run <name> [--input k=v]               run it; pauses when it needs input
+  ahub flow resume <run-id> --input k=v            continue a paused run
+  ahub flow list|show|rm|runs
 
   ahub guide [--human]                  the mental model
   ahub help-json                        the command catalog
