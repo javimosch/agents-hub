@@ -4,21 +4,76 @@
   "model": {
     "what_it_is": "An assistant is a saved prompt + model. A thread is a conversation with one assistant. A chat is one turn: your message in, the model's answer out, both appended to the thread.",
     "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/assistants, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
-    "what_it_is_not": "Not a chat UI, not a daemon, and not an agent loop yet. One turn per invocation; no tool calling, no RAG, no sub-agents in v0.1."
+    "what_it_is_not": "Not a chat UI, not a daemon, and not an agent loop yet. One turn per invocation; no tool calling and no sub-agents in v0.2. There is deliberately no RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text.",
+    "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them."
   },
   "loop": [
-    {"command": "ahub setup --admin-token <t>", "why": "Once per bkn instance, by a human. Declares the collections and their owner-scoped access policy. Never needed again, and never run on the serving path."},
-    {"command": "ahub login --email <e> --password <p>", "why": "Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see."},
-    {"command": "ahub assistant create --name helper --model <m> --system \"...\"", "why": "Saves the configuration once so later turns are one short command."},
-    {"command": "ahub chat --assistant helper --message \"...\"", "why": "Opens a thread and answers. Prints the thread id; pass it back with --thread to continue."},
-    {"command": "ahub chat --assistant helper --thread <id> --message \"...\"", "why": "Continues an existing conversation. History is replayed to the model automatically."},
-    {"command": "ahub thread show <id>", "why": "The full transcript, in order, with per-message token counts."}
+    {
+      "command": "ahub setup --admin-token <t>",
+      "why": "Once per bkn instance, by a human. Declares the collections and their owner-scoped access policy. Never needed again, and never run on the serving path."
+    },
+    {
+      "command": "ahub login --email <e> --password <p>",
+      "why": "Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see."
+    },
+    {
+      "command": "ahub assistant create --name helper --model <m> --system \"...\"",
+      "why": "Saves the configuration once so later turns are one short command."
+    },
+    {
+      "command": "ahub chat --assistant helper --message \"...\"",
+      "why": "Opens a thread and answers. Prints the thread id; pass it back with --thread to continue."
+    },
+    {
+      "command": "ahub chat --assistant helper --thread <id> --message \"...\"",
+      "why": "Continues an existing conversation. History is replayed to the model automatically."
+    },
+    {
+      "command": "ahub thread show <id>",
+      "why": "The full transcript, in order, with per-message token counts."
+    },
+    {
+      "command": "ahub assistant update helper --memory-project <p> --skills a,b",
+      "why": "Gives an assistant a memory scope and a set of procedures. Both are opt-in and both are named in the configuration, so an answer can be reproduced from it."
+    },
+    {
+      "command": "ahub memory recall --query \"...\" --project <p>",
+      "why": "Read memgraph directly, rendered through the same budget a chat turn would use, so you see what the model would see."
+    },
+    {
+      "command": "ahub skill recommend \"<task>\"",
+      "why": "Ask memgraph's skill graph which procedure fits, then `ahub skill show <name>` to read it before spending tokens on it."
+    }
   ],
   "concepts": [
-    {"name": "owner scoping", "what": "bkn stamps every document with your user id from your token and filters reads by it. ahub never sends an owner field, so it cannot read or write another user's threads even if this code has a bug."},
-    {"name": "provider", "what": "Any OpenAI-compatible /chat/completions endpoint: OpenAI, Mistral, Ollama, vLLM, OpenRouter. Set it once with `ahub config set --provider-url ... --provider-key ...`."},
-    {"name": "profile", "what": "A named set of {bkn url, token, provider, model}, like an aws-cli profile. Switch with --profile or `ahub config set-profile <n>`."},
-    {"name": "seq", "what": "Messages are ordered by an integer seq, not by timestamp, so two messages written in the same millisecond can never come back swapped."}
+    {
+      "name": "owner scoping",
+      "what": "bkn stamps every document with your user id from your token and filters reads by it. ahub never sends an owner field, so it cannot read or write another user's threads even if this code has a bug."
+    },
+    {
+      "name": "provider",
+      "what": "Any OpenAI-compatible /chat/completions endpoint: OpenAI, Mistral, Ollama, vLLM, OpenRouter. Set it once with `ahub config set --provider-url ... --provider-key ...`."
+    },
+    {
+      "name": "profile",
+      "what": "A named set of {bkn url, token, provider, model}, like an aws-cli profile. Switch with --profile or `ahub config set-profile <n>`."
+    },
+    {
+      "name": "seq",
+      "what": "Messages are ordered by an integer seq, not by timestamp, so two messages written in the same millisecond can never come back swapped."
+    },
+    {
+      "name": "memory",
+      "what": "Recall is delegated to the memgraph CLI: explicit argv, no shell, validated values, a timeout and a character budget. ahub implements no retrieval of its own and stores no embeddings."
+    },
+    {
+      "name": "skills",
+      "what": "A skill is a SKILL.md resolved by name through memgraph's skill graph. ahub reads only the file memgraph pointed at, only when the skill was named, and only if it is markdown."
+    },
+    {
+      "name": "budget",
+      "what": "Recalled memories are capped per-memory and in total (default 1200/6000 characters). This is the difference between memory as a feature and memory as a bill, since the block is re-sent every turn."
+    }
   ],
   "gotchas": [
     "The user message is stored before the model is called. A provider timeout costs you the answer, not the question: retry with the same --thread.",
@@ -26,15 +81,42 @@
     "An assistant name that matches two assistants is an error, not a coin flip. Use the id, or rename one.",
     "Exit 105 means the model provider failed and a retry may work. Exit 90 means your token is wrong or expired and retrying will not help.",
     "`ahub setup` needs the bkn ADMIN token; nothing else does. If a command asks you for the admin token, that is a bug.",
-    "Deleting an assistant leaves its threads: a conversation that happened is a fact, and dropping the config does not un-happen it."
+    "Deleting an assistant leaves its threads: a conversation that happened is a fact, and dropping the config does not un-happen it.",
+    "Memories are framed as reference material and the model is told not to follow instructions inside them. Skills are the opposite: they ARE instructions, which is why one is only loaded when named.",
+    "A memory or skill that cannot be loaded degrades the turn instead of failing it, and says so in the answer's `memory.error` / `skills.skipped`. Pass --memory-required or --skills-required to make it fatal.",
+    "Several servers behind the OpenAI wire shape keep only the FIRST system message; ahub merges the leading run into one, which is what makes an injected memory block actually arrive.",
+    "The provider timeout is separate from the bkn timeout (AHUB_PROVIDER_TIMEOUT, default 300s). A reasoning model with a large prompt will exceed a database-shaped timeout.",
+    "An expired access token is refreshed and re-persisted automatically -- but only for a token that came from the profile. A token passed in by --token or AHUB_TOKEN is yours to manage."
   ],
   "recipes": [
-    {"command": "ahub chat --assistant helper --message \"$(cat prompt.txt)\" | jq -r .content", "why": "The answer alone, for a pipeline."},
-    {"command": "ahub thread list --assistant helper --limit 5", "why": "The five most recently touched conversations with one assistant."},
-    {"command": "ahub chat --assistant helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'", "why": "Watch the answer arrive while still getting a parseable stream."}
+    {
+      "command": "ahub chat --assistant helper --message \"$(cat prompt.txt)\" | jq -r .content",
+      "why": "The answer alone, for a pipeline."
+    },
+    {
+      "command": "ahub thread list --assistant helper --limit 5",
+      "why": "The five most recently touched conversations with one assistant."
+    },
+    {
+      "command": "ahub chat --assistant helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'",
+      "why": "Watch the answer arrive while still getting a parseable stream."
+    },
+    {
+      "command": "ahub chat --assistant helper --memory-project machin --message \"why does the daemon loop leak?\"",
+      "why": "One turn with recalled context, without changing the saved assistant."
+    },
+    {
+      "command": "ahub chat --assistant helper --skill agent-first-cli-specs --message \"audit this exit code table\"",
+      "why": "Load a procedure for one turn."
+    },
+    {
+      "command": "ahub chat ... | jq '{answer:.content, remembered:.memory.used, skills:.skills.loaded}'",
+      "why": "The answer plus exactly what informed it."
+    }
   ],
   "see_also": {
     "help-json": "ahub help-json - the command catalog: every command, flag, and exit code",
-    "bkn": "bkn guide - the backend this tool stores everything in"
+    "bkn": "bkn guide - the backend this tool stores everything in",
+    "memgraph": "memgraph guide - the memory and skill store ahub delegates to"
   }
 }

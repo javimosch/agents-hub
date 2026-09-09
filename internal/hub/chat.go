@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/provider"
 )
 
@@ -15,6 +16,17 @@ type Turn struct {
 	Model     string         `json:"model"`
 	Usage     provider.Usage `json:"usage"`
 	Finish    string         `json:"finish_reason,omitempty"`
+	Memory    *memory.Block  `json:"memory,omitempty"`
+	Skills    *SkillReport   `json:"skills,omitempty"`
+}
+
+// SkillReport says which skills actually made it into the prompt. An answer
+// given without the procedure it was supposed to follow must not look like
+// one given with it.
+type SkillReport struct {
+	Loaded  []string          `json:"loaded,omitempty"`
+	Chars   int               `json:"chars,omitempty"`
+	Skipped map[string]string `json:"skipped,omitempty"`
 }
 
 // ChatOptions is one call to Chat.
@@ -28,6 +40,40 @@ type ChatOptions struct {
 	// hide the loss instead of bounding it.
 	HistoryLimit int
 	OnDelta      func(string)
+
+	// Memory, when set, recalls from a memgraph project and prepends the
+	// result as a second system message. It is the deliberate alternative to
+	// a vector store: the memories are written on purpose, readable as text,
+	// and owned by a tool that already exists.
+	Memory *MemoryOptions
+
+	// Skills names procedures to load and prepend. Resolution and reading
+	// happen through the memory client, which is the only thing here allowed
+	// to touch the filesystem.
+	Skills *SkillOptions
+}
+
+// SkillOptions is the set of skills to load for this turn.
+type SkillOptions struct {
+	Client *memory.Client
+	Names  []string
+	// Required fails the turn when a named skill cannot be loaded. Default is
+	// off for the same reason as memory: a missing procedure should degrade
+	// the answer, not withhold it. Naming one explicitly is a different
+	// matter and the CLI treats it as such.
+	Required bool
+}
+
+// MemoryOptions is the recall to run before the turn.
+type MemoryOptions struct {
+	Client  *memory.Client
+	Project string
+	Query   string // empty means the user's message
+	Limit   int
+	Budget  memory.Budget
+	// Required makes a failed recall fail the turn. Off by default: a memory
+	// store being down should degrade an answer, not withhold it.
+	Required bool
 }
 
 // Chat runs one exchange: replay the thread, ask the model, persist both turns.
@@ -55,9 +101,26 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, err
 	}
 
-	msgs := make([]provider.Message, 0, len(history)+2)
+	msgs := make([]provider.Message, 0, len(history)+3)
 	if opts.Assistant.System != "" {
 		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Assistant.System})
+	}
+	block, err := recallFor(opts)
+	if err != nil {
+		return nil, err
+	}
+	// The memory block sits after the assistant's own instructions and before
+	// the conversation: the prompt still outranks it, and it is not mistaken
+	// for something the user said.
+	if block != nil && block.Text != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: block.Text})
+	}
+	skills, skillText, err := loadSkills(opts)
+	if err != nil {
+		return nil, err
+	}
+	if skillText != "" {
+		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: skillText})
 	}
 	for _, m := range history {
 		msgs = append(msgs, provider.Message{Role: m.Role, Content: m.Content})
@@ -109,7 +172,91 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 	return &Turn{
 		Thread: *th, User: userMsg, Assistant: asstMsg,
 		Model: model, Usage: resp.Usage, Finish: resp.FinishReason,
+		Memory: block, Skills: skills,
 	}, nil
+}
+
+// loadSkills resolves each named skill through memgraph and reads its file.
+func loadSkills(opts ChatOptions) (*SkillReport, string, error) {
+	so := opts.Skills
+	names := append([]string{}, opts.Assistant.Skills...)
+	if so != nil {
+		names = append(names, so.Names...)
+	}
+	names = dedupe(names)
+	if len(names) == 0 || so == nil || so.Client == nil {
+		return nil, "", nil
+	}
+	rep := &SkillReport{}
+	loaded := map[string]string{}
+	order := make([]string, 0, len(names))
+	for _, name := range names {
+		sk, err := so.Client.FindSkill(name, 10)
+		if err == nil {
+			var body string
+			body, err = memory.LoadSkill(sk)
+			if err == nil {
+				loaded[name] = body
+				order = append(order, name)
+				rep.Loaded = append(rep.Loaded, name)
+				continue
+			}
+		}
+		if so.Required {
+			return nil, "", fmt.Errorf("skill %q: %w", name, err)
+		}
+		if rep.Skipped == nil {
+			rep.Skipped = map[string]string{}
+		}
+		rep.Skipped[name] = err.Error()
+	}
+	text := memory.SkillBlock(loaded, order)
+	rep.Chars = len(text)
+	return rep, text, nil
+}
+
+// dedupe keeps the first occurrence of each name. An assistant configured
+// with a skill and then asked for it again on the command line should not
+// pay for it twice.
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	out := in[:0]
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// recallFor runs the pre-turn recall, if one was asked for.
+//
+// A recall failure is reported on the turn rather than raised, unless the
+// caller said the memory was required. Losing context degrades an answer;
+// refusing to answer at all because a side lookup failed is worse than the
+// answer would have been.
+func recallFor(opts ChatOptions) (*memory.Block, error) {
+	m := opts.Memory
+	if m == nil || m.Client == nil {
+		return nil, nil
+	}
+	q := m.Query
+	if q == "" {
+		q = opts.Message
+	}
+	res, err := m.Client.Recall(memory.Query{
+		Text: q, Project: m.Project, Limit: m.Limit, Format: "index",
+	})
+	if err != nil {
+		if m.Required {
+			return nil, fmt.Errorf("memory recall failed: %w", err)
+		}
+		return &memory.Block{Project: m.Project, Error: err.Error()}, nil
+	}
+	b := memory.Context(res, m.Project, m.Budget)
+	return &b, nil
 }
 
 // touch records how many messages the thread now holds and when it last moved.

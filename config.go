@@ -24,6 +24,12 @@ type Config struct {
 	ProviderKey string `json:"provider_key,omitempty"`
 	Model       string `json:"model,omitempty"`
 	TimeoutSecs int    `json:"timeout_secs,omitempty"`
+	// ProviderTimeoutSecs is separate on purpose. A bkn call is a database
+	// read over the network and a minute is generous; a model call with a
+	// large prompt and a reasoning budget can legitimately run for minutes,
+	// and one shared number means either bkn hangs too long or generation is
+	// cut off mid-answer.
+	ProviderTimeoutSecs int `json:"provider_timeout_secs,omitempty"`
 }
 
 // File is the on-disk shape: named profiles plus which one is active.
@@ -127,14 +133,26 @@ func resolve(fl *flags) (Config, string, error) {
 	c.ProviderKey = pick("", "AHUB_PROVIDER_KEY", c.ProviderKey, "")
 	c.Model = pick(fl.model, "AHUB_MODEL", c.Model, "")
 	if c.TimeoutSecs == 0 {
-		c.TimeoutSecs = 120
+		c.TimeoutSecs = 60
 	}
-	if v := os.Getenv("AHUB_TIMEOUT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			c.TimeoutSecs = n
-		}
+	if c.ProviderTimeoutSecs == 0 {
+		c.ProviderTimeoutSecs = 300
 	}
+	envInt("AHUB_TIMEOUT", &c.TimeoutSecs)
+	envInt("AHUB_PROVIDER_TIMEOUT", &c.ProviderTimeoutSecs)
 	return c, name, nil
 }
 
+func envInt(key string, dst *int) {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			*dst = n
+		}
+	}
+}
+
 func (c Config) timeout() time.Duration { return time.Duration(c.TimeoutSecs) * time.Second }
+
+func (c Config) providerTimeout() time.Duration {
+	return time.Duration(c.ProviderTimeoutSecs) * time.Second
+}

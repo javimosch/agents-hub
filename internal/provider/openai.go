@@ -42,7 +42,7 @@ func (o *openAI) Chat(ctx context.Context, req Request, onDelta func(string)) (*
 	stream := onDelta != nil
 	body := map[string]any{
 		"model":    req.Model,
-		"messages": req.Messages,
+		"messages": mergeSystem(req.Messages),
 		"stream":   stream,
 	}
 	if req.Temperature != nil {
@@ -83,6 +83,32 @@ func (o *openAI) Chat(ctx context.Context, req Request, onDelta func(string)) (*
 		return o.readStream(resp.Body, onDelta)
 	}
 	return o.readWhole(resp.Body)
+}
+
+// mergeSystem collapses the leading run of system messages into one.
+//
+// Several servers behind this wire shape keep only the first system message
+// and silently drop the rest -- DeepSeek via OpenRouter does, which is how a
+// recalled-memory block can be built, reported, sent, and still never reach
+// the model. Nothing errors; the prompt token count is simply too small to
+// contain what was sent. Merging costs nothing and removes the whole class.
+func mergeSystem(msgs []Message) []Message {
+	n := 0
+	for n < len(msgs) && msgs[n].Role == RoleSystem {
+		n++
+	}
+	if n < 2 {
+		return msgs
+	}
+	parts := make([]string, 0, n)
+	for _, m := range msgs[:n] {
+		if m.Content != "" {
+			parts = append(parts, m.Content)
+		}
+	}
+	out := make([]Message, 0, len(msgs)-n+1)
+	out = append(out, Message{Role: RoleSystem, Content: strings.Join(parts, "\n\n")})
+	return append(out, msgs[n:]...)
 }
 
 type oaChoice struct {

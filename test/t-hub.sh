@@ -64,7 +64,7 @@ echo "== agents-hub live suite (bkn :$BKN_PORT, provider :$PROV_PORT) =="
 
 # --- introspection works with no backend at all ----------------------------
 chk "help-json lists chat"            "chat"    "$("$AHUB" help-json | python3 -c 'import json,sys;print("chat" if "chat" in json.load(sys.stdin)["commands"] else "no")')"
-chk "help-json carries exit code 105" "model provider failed or the turn was interrupted" "$("$AHUB" help-json | j exit_codes.105)"
+chk "help-json carries exit code 105" "model provider or memgraph failed, or the turn was interrupted" "$("$AHUB" help-json | j exit_codes.105)"
 chk "guide is machine-readable"       "ahub"    "$("$AHUB" guide | j tool)"
 chk "unknown command exits 80"        "80"      "$(code frobnicate)"
 chk "unknown command is typed"        "unknown_command" "$(err_type)"
@@ -101,6 +101,7 @@ OUT="$(a chat --assistant helper --message "first question")"
 TID="$(printf '%s' "$OUT" | j thread)"
 chk "chat opened a thread"            "True"    "$([ -n "$TID" ] && echo True || echo False)"
 chkin "system prompt reached the model" "roles=system,user" "$(printf '%s' "$OUT" | j content)"
+chkin "no memory without a project"   "mem=0"   "$(printf '%s' "$OUT" | j content)"
 chkin "the question reached the model"  "echo=first question" "$(printf '%s' "$OUT" | j content)"
 chk "usage is recorded"               "7"       "$(printf '%s' "$OUT" | j usage.completion_tokens)"
 chk "model is recorded"               "m1"      "$(printf '%s' "$OUT" | j model)"
@@ -135,6 +136,109 @@ chk "the question survived the failure" "5"     "$(a thread show "$TID" | j coun
 chk "the stored question is the failed one" "boom" "$(a thread show "$TID" | j messages.4.content)"
 chk "the thread count stays honest"   "5"       "$(a thread show "$TID" | j thread.messages)"
 curl -sf -X POST "$P/control/fail" -d '{"fail":false}' >/dev/null
+
+# --- memory ----------------------------------------------------------------
+# Against a stand-in memgraph, so these assert ahub's behaviour rather than
+# the contents of whoever's machine is running the suite.
+export AHUB_MEMGRAPH="$ROOT/test/fake-memgraph.py"
+export FAKE_MEMGRAPH_LOG="$WORK/memgraph.argv"
+
+chk "memory status finds the binary"  "True"    "$(a memory status | j available)"
+chk "recall returns memories"         "2"       "$(a memory recall --query "port release" --project demo | j count)"
+chk "recall reports its budget"       "2"       "$(a memory recall --query "port release" --project demo | j context.used)"
+chk "recall needs a query"            "82"      "$(code memory recall)"
+chk "save reaches memgraph"           "333"     "$(a memory save --text "a fact" --project demo --type project | j saved.id)"
+chk "projects passes through"         "demo"    "$(a memory projects | j projects.projects.0.name)"
+
+# A value that could be read as a flag is refused rather than escaped.
+chk "a dashed project is refused"     "85"      "$(code memory recall --query hi --project=-oops)"
+chk "a dashed project is typed"       "invalid_value" "$(err_type)"
+
+# The assistant carries the project; the chat turn injects a second system
+# message. The echoing provider reports the roles it actually received.
+a assistant create --name remembers --model m1 --system "sys" --memory-project demo >/dev/null
+M="$(a chat --assistant remembers --message "how does the seeder release its port")"
+chkin "memory reaches the model"      "mem=1"   "$(printf '%s' "$M" | j content)"
+chk "the turn reports memory use"     "2"       "$(printf '%s' "$M" | j memory.used)"
+chk "the memory project is reported"  "demo"    "$(printf '%s' "$M" | j memory.project)"
+chkin "the recall query was the message" "how does the seeder release its port" "$(printf '%s' "$M" | j content)"
+
+# argv, not a shell line: a message full of metacharacters arrives verbatim.
+a chat --assistant remembers --message 'rm -rf /; $(touch /tmp/pwned) `id` && echo x' >/dev/null
+chk "no shell interpretation"         "False"   "$([ -e /tmp/pwned ] && echo True || echo False)"
+chk "the whole message reached memgraph" "True" "$(python3 -c '
+import json,sys
+want = "rm -rf /; $(touch /tmp/pwned) \x60id\x60 && echo x"
+for line in open(sys.argv[1]):
+    argv = json.loads(line)
+    if want in argv: print("True"); break
+else: print("False")' "$WORK/memgraph.argv")"
+
+chkin "--no-memory skips recall"      "mem=0"   "$(a chat --assistant remembers --no-memory --message hi | j content)"
+
+# A memory store that is down degrades the answer; it does not withhold it.
+FAKE_MEMGRAPH_FAIL=1 "$AHUB" chat --assistant remembers --message "still answer me" >"$WORK/degraded" 2>/dev/null
+chk "a failed recall still answers"   "True"    "$(j ok <"$WORK/degraded")"
+chkin "the failure is reported"       "store on fire" "$(j memory.error <"$WORK/degraded")"
+chk "nothing was injected"            "0"       "$(j memory.used <"$WORK/degraded")"
+chk "--memory-required makes it fatal" "105"    "$(FAKE_MEMGRAPH_FAIL=1 code chat --assistant remembers --memory-required --message x)"
+
+# A machine without memgraph: explicit memory is an error, a configured
+# assistant still answers.
+chk "missing memgraph exits 92"       "92"      "$(AHUB_MEMGRAPH=/nonexistent code memory status)"
+chk "missing memgraph is typed"       "memgraph_missing" "$(err_type)"
+chk "explicit --memory-project needs it" "92"   "$(AHUB_MEMGRAPH=/nonexistent code chat --assistant helper --memory-project demo --message hi)"
+chk "a configured assistant degrades" "True"    "$(AHUB_MEMGRAPH=/nonexistent a chat --assistant remembers --message hi | j ok)"
+
+# --- skills ----------------------------------------------------------------
+# A skill is instruction, not reference: it is loaded only when named, and the
+# path it is read from comes from memgraph, never from the caller.
+cat > "$WORK/SKILL.md" <<'SKILL'
+---
+name: demo-skill
+---
+# Demo skill
+When asked about ports, always mention the stop channel.
+SKILL
+export FAKE_SKILL_PATH="$WORK/SKILL.md"
+
+chk "skill search finds it"           "demo-skill" "$(a skill search "ports" | j skills.0.name)"
+chk "skill recommend answers"         "demo-skill" "$(a skill recommend "release a port cleanly" | j skills.0.name)"
+chkin "skill show loads the file"     "stop channel" "$(a skill show demo-skill | j content)"
+chk "an unknown skill is not found"   "92"      "$(code skill show no-such-skill)"
+
+K="$(a chat --assistant helper --skill demo-skill --message "how do I release a port")"
+chkin "the skill reaches the model"   "skl=1"   "$(printf '%s' "$K" | j content)"
+chk "the turn reports the skill"      "demo-skill" "$(printf '%s' "$K" | j skills.loaded.0)"
+chkin "no skill without one named"    "skl=0"   "$(a chat --assistant helper --message plain | j content)"
+chkin "--no-skills wins"              "skl=0"   "$(a chat --assistant helper --skill demo-skill --no-skills --message x | j content)"
+
+# An assistant can carry its skills, and a missing one degrades by default.
+a assistant create --name skilled --model m1 --system "sys" --skills demo-skill,ghost-skill >/dev/null
+SK="$(a chat --assistant skilled --message "how do I release a port")"
+chkin "a configured skill is loaded"  "skl=1"   "$(printf '%s' "$SK" | j content)"
+chk "the missing one is reported"     "True"    "$(printf '%s' "$SK" | python3 -c 'import json,sys;print("ghost-skill" in (json.load(sys.stdin)["skills"].get("skipped") or {}))')"
+chk "--skills-required makes it fatal" "92"     "$(code chat --assistant skilled --skills-required --message x)"
+
+# A skill whose file is not markdown is refused, wherever the path came from.
+# 85, not 105: this tool refused the path, memgraph did not fail.
+chk "a non-markdown skill is refused" "85"      "$(FAKE_SKILL_BADPATH=1 code skill show bad-skill)"
+chkin "and it says why"               "not markdown" "$(j error.message <"$WORK/err")"
+
+# --- token refresh ---------------------------------------------------------
+# A bkn access token is a 15-minute JWT. An agent must not have to notice.
+python3 -c '
+import json,sys
+p = sys.argv[1]; d = json.load(open(p))
+d["profiles"]["default"]["token"] = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dead.beef"
+json.dump(d, open(p, "w"))' "$AHUB_CONFIG"
+chk "an expired token is refreshed"   "True"    "$(a whoami | j ok)"
+chk "the rotated pair is persisted"   "True"    "$(python3 -c '
+import json,sys
+d = json.load(open(sys.argv[1]))
+print(not d["profiles"]["default"]["token"].endswith("beef"))' "$AHUB_CONFIG")"
+# A token handed in explicitly is the caller'"'"'s to manage, not ours to swap.
+chk "an explicit bad token is not refreshed" "90" "$(AHUB_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dead.beef code whoami)"
 
 # --- tenancy ---------------------------------------------------------------
 # The whole security claim of this design is that bkn, not ahub, keeps users

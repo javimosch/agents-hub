@@ -50,6 +50,10 @@ func main() {
 		threadCmd(fl)
 	case "chat":
 		chatCmd(fl)
+	case "memory":
+		memoryCmd(fl)
+	case "skill":
+		skillCmd(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"unknown command: "+cmd, "ahub help-json", "ahub guide")
@@ -69,7 +73,34 @@ func client(fl *flags) (*bkn.Client, Config) {
 			"no token; log in or set AHUB_TOKEN",
 			"ahub login --email <email> --password <password>")
 	}
-	return bkn.New(cfg.BknURL, cfg.Token, cfg.timeout()), cfg
+	c := bkn.New(cfg.BknURL, cfg.Token, cfg.timeout())
+	// The refresh token is only used when the access token has expired, and
+	// only for the profile it came from: a token passed in by flag or
+	// environment is the caller's to manage, and silently swapping it for one
+	// from a config file would be a surprise.
+	if cfg.Refresh != "" && fl.token == "" && os.Getenv("AHUB_TOKEN") == "" {
+		c.RefreshToken = cfg.Refresh
+		c.OnTokens = func(t bkn.Tokens) { persistTokens(fl, t) }
+	}
+	return c, cfg
+}
+
+// persistTokens writes a rotated pair back to the active profile. A failure
+// here is reported but not fatal: the command in flight already has a working
+// token, and losing the next one is better than losing this one's work.
+func persistTokens(fl *flags, t bkn.Tokens) {
+	f, err := loadFile()
+	if err != nil {
+		out.Log("token refreshed but not saved: %v", err)
+		return
+	}
+	name := profileName(fl, f)
+	p := f.Profiles[name]
+	p.Token, p.Refresh = t.Access, t.Refresh
+	f.Profiles[name] = p
+	if err := saveFile(f); err != nil {
+		out.Log("token refreshed but not saved: %v", err)
+	}
 }
 
 func hubFor(fl *flags) (*hub.Hub, Config) {
@@ -120,6 +151,12 @@ func usage() {
 
   ahub chat --assistant <n> --message <m> [--thread <id>] [--stream]
   ahub thread list|show|rm
+
+  ahub memory recall --query <q> [--project <p>]   read memgraph directly
+  ahub memory save --text <t> [--project <p>]      write one memory
+  ahub memory status|projects|read <id[/slug]>
+
+  ahub skill search <q> | recommend <task> | show <name>
 
   ahub guide [--human]                  the mental model
   ahub help-json                        the command catalog

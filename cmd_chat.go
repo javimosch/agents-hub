@@ -10,6 +10,7 @@ import (
 
 	"github.com/javimosch/agents-hub/internal/bkn"
 	"github.com/javimosch/agents-hub/internal/hub"
+	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/out"
 	"github.com/javimosch/agents-hub/internal/provider"
 )
@@ -52,7 +53,7 @@ func chatCmd(fl *flags) {
 		name = cfg.Provider
 	}
 	p, err := provider.New(name, provider.Config{
-		BaseURL: cfg.ProviderURL, APIKey: cfg.ProviderKey, Timeout: cfg.timeout(),
+		BaseURL: cfg.ProviderURL, APIKey: cfg.ProviderKey, Timeout: cfg.providerTimeout(),
 	})
 	if err != nil {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error(),
@@ -70,6 +71,8 @@ func chatCmd(fl *flags) {
 		Thread:       th,
 		Message:      msg,
 		HistoryLimit: fl.intVal("history", 100),
+		Memory:       memoryFor(fl, a),
+		Skills:       skillsFor(fl, a),
 	}
 	if fl.stream {
 		// Deltas are NDJSON on stdout, not bare text: stdout stays parseable,
@@ -87,6 +90,10 @@ func chatCmd(fl *flags) {
 		if bkn.FromBackend(err) {
 			fail(err, "chat")
 		}
+		if strings.HasPrefix(err.Error(), "skill ") {
+			out.Fail(out.NotFound, "skill_error", err.Error(),
+				`ahub skill search "..."`, "or drop --skills-required")
+		}
 		if ctx.Err() != nil {
 			out.Fail(out.ExternalError, "cancelled",
 				"interrupted before the model answered; the question is stored",
@@ -97,7 +104,7 @@ func chatCmd(fl *flags) {
 			"retry, or try --model with a different model")
 	}
 
-	out.Data(map[string]any{
+	fields := map[string]any{
 		"thread":     turn.Thread.ID,
 		"assistant":  a.Name,
 		"model":      turn.Model,
@@ -106,8 +113,58 @@ func chatCmd(fl *flags) {
 		"seq":        turn.Assistant.Seq,
 		"usage":      turn.Usage,
 		"finish":     turn.Finish,
-	})
+	}
+	// Memory is reported whenever it was attempted, including when it found
+	// nothing or failed: an answer given without the context it was supposed
+	// to have must not look like an answer given with it.
+	if turn.Memory != nil {
+		fields["memory"] = turn.Memory
+	}
+	if turn.Skills != nil {
+		fields["skills"] = turn.Skills
+	}
+	out.Data(fields)
 	if fl.human {
 		out.Log("--- %s (%s) thread %s", a.Name, turn.Model, turn.Thread.ID)
+	}
+}
+
+// memoryFor decides whether this turn recalls anything.
+//
+// --memory-project overrides the assistant's; --no-memory turns it off for
+// one turn without editing the assistant. A missing memgraph binary is fatal
+// only when memory was asked for explicitly on the command line -- an
+// assistant configured with a project on a machine without memgraph should
+// still answer, and say that it did so without memory.
+func memoryFor(fl *flags, a hub.Assistant) *hub.MemoryOptions {
+	if fl.has("no-memory") {
+		return nil
+	}
+	project := fl.str("memory-project")
+	explicit := project != ""
+	if project == "" {
+		project = a.MemoryProject
+	}
+	if project == "" {
+		return nil
+	}
+	c, err := memory.New(0)
+	if err != nil {
+		if explicit {
+			out.Fail(out.NotFound, "memgraph_missing", err.Error(),
+				"install memgraph, point AHUB_MEMGRAPH at it, or pass --no-memory")
+		}
+		out.Log("memory: %v; answering without it", err)
+		return nil
+	}
+	return &hub.MemoryOptions{
+		Client:  c,
+		Project: project,
+		Limit:   fl.intVal("memory-limit", 5),
+		Budget: memory.Budget{
+			PerMemory: fl.intVal("memory-per", 0),
+			Total:     fl.intVal("memory-chars", 0),
+		},
+		Required: fl.has("memory-required"),
 	}
 }

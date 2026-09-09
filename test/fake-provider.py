@@ -35,7 +35,13 @@ class H(BaseHTTPRequestHandler):
         msgs = req.get("messages", [])
         roles = ",".join(m["role"] for m in msgs)
         last = msgs[-1]["content"] if msgs else ""
-        text = f"turns={len(msgs)} roles={roles} echo={last}"
+        # Whether a recalled-memory block actually arrived. The client merges
+        # leading system messages, so counting roles cannot answer this.
+        mem = int(any("Recalled memories" in m.get("content", "")
+                      for m in msgs if m["role"] == "system"))
+        skl = int(any("## Skills" in m.get("content", "")
+                      for m in msgs if m["role"] == "system"))
+        text = f"turns={len(msgs)} roles={roles} mem={mem} skl={skl} echo={last}"
         usage = {"prompt_tokens": len(msgs), "completion_tokens": 7, "total_tokens": len(msgs) + 7}
 
         if req.get("stream"):

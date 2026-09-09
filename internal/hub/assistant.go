@@ -21,25 +21,53 @@ type Assistant struct {
 	Provider    string   `json:"provider,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`
 	MaxTokens   int      `json:"max_tokens,omitempty"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	// MemoryProject names a memgraph scope to recall from before each turn.
+	// Empty means the assistant has no memory, which stays the default: an
+	// assistant that silently reads a knowledge store is one whose answers
+	// cannot be reproduced from its own configuration.
+	MemoryProject string `json:"memory_project,omitempty"`
+	// Skills names procedures to load before each turn, resolved through
+	// memgraph's skill graph. Unlike memories, a skill is instruction: it is
+	// loaded only because someone named it here or on the command line.
+	Skills    []string `json:"skills,omitempty"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
 }
 
 func assistantFrom(r bkn.Record) Assistant {
 	a := Assistant{
-		ID:        r.Str("id"),
-		Name:      r.Str("name"),
-		Model:     r.Str("model"),
-		System:    r.Str("system"),
-		Provider:  r.Str("provider"),
-		CreatedAt: r.Str("created_at"),
-		UpdatedAt: r.Str("updated_at"),
-		MaxTokens: int(r.Num("max_tokens")),
+		ID:            r.Str("id"),
+		Name:          r.Str("name"),
+		Model:         r.Str("model"),
+		System:        r.Str("system"),
+		Provider:      r.Str("provider"),
+		MemoryProject: r.Str("memory_project"),
+		CreatedAt:     r.Str("created_at"),
+		UpdatedAt:     r.Str("updated_at"),
+		MaxTokens:     int(r.Num("max_tokens")),
 	}
 	if v, ok := r["temperature"].(float64); ok {
 		a.Temperature = &v
 	}
+	for _, x := range asList(r["skills"]) {
+		a.Skills = append(a.Skills, x)
+	}
 	return a
+}
+
+// asList reads a JSON array of strings back out of a stored document.
+func asList(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // CreateAssistant saves a new assistant. Name and model are required: an
@@ -63,6 +91,12 @@ func (h *Hub) CreateAssistant(a Assistant) (Assistant, error) {
 	}
 	if a.Provider != "" {
 		doc["provider"] = a.Provider
+	}
+	if a.MemoryProject != "" {
+		doc["memory_project"] = a.MemoryProject
+	}
+	if len(a.Skills) > 0 {
+		doc["skills"] = a.Skills
 	}
 	if a.Temperature != nil {
 		doc["temperature"] = *a.Temperature

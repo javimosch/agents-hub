@@ -111,10 +111,21 @@ func FromBackend(err error) bool {
 }
 
 // Client talks to one bkn instance with one token.
+//
+// RefreshToken and OnTokens together make expiry invisible to callers. A bkn
+// access token is a stateless JWT that lives 15 minutes; without this, every
+// command run more than 15 minutes after a login fails with 90 and the agent
+// has to know to log in again -- which is a password prompt in the middle of
+// an automated task.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL      string
+	Token        string
+	RefreshToken string
+	// OnTokens is called with a rotated pair so the caller can persist it.
+	// bkn rotates the refresh token on use: losing the new one costs the
+	// session, so this is not optional bookkeeping.
+	OnTokens func(Tokens)
+	HTTP     *http.Client
 }
 
 // New builds a client. A zero timeout means 30s: an agent waiting on a hung
@@ -140,19 +151,57 @@ func (c *Client) WithToken(token string) *Client {
 }
 
 func (c *Client) do(method, path string, body any, out any) error {
-	var rdr io.Reader
+	var raw []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rdr = bytes.NewReader(b)
+		raw = b
+	}
+	err := c.attempt(method, path, raw, out)
+	// One retry, and only for an expired token. A second 401 after a
+	// successful refresh means the credential is wrong rather than stale, and
+	// retrying that is just a slower way to fail.
+	if err != nil && c.expired(err) && c.RefreshToken != "" {
+		if rerr := c.rotate(); rerr == nil {
+			return c.attempt(method, path, raw, out)
+		}
+	}
+	return err
+}
+
+// expired reports a 401, which is what bkn answers for a token past its TTL.
+// A 403 is a policy refusal and refreshing cannot help.
+func (c *Client) expired(err error) bool {
+	e, ok := err.(*APIError)
+	return ok && e.Status == http.StatusUnauthorized
+}
+
+// rotate trades the refresh token for a new pair and adopts it.
+func (c *Client) rotate() error {
+	fresh := &Client{BaseURL: c.BaseURL, HTTP: c.HTTP}
+	tokens, err := fresh.Refresh(c.RefreshToken)
+	if err != nil {
+		return err
+	}
+	c.Token, c.RefreshToken = tokens.Access, tokens.Refresh
+	if c.OnTokens != nil {
+		c.OnTokens(tokens)
+	}
+	return nil
+}
+
+func (c *Client) attempt(method, path string, raw []byte, out any) error {
+	var rdr io.Reader
+	if raw != nil {
+		rdr = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequest(method, c.BaseURL+path, rdr)
 	if err != nil {
 		return err
 	}
-	if body != nil {
+	if raw != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if c.Token != "" {
@@ -164,7 +213,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -176,18 +225,18 @@ func (c *Client) do(method, path string, body any, out any) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(raw, &env) == nil {
+		if json.Unmarshal(respBody, &env) == nil {
 			ae.Type, ae.Message = env.Error.Type, env.Error.Message
 		}
 		if ae.Message == "" {
-			ae.Message = strings.TrimSpace(string(raw))
+			ae.Message = strings.TrimSpace(string(respBody))
 		}
 		return ae
 	}
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	return json.Unmarshal(respBody, out)
 }
 
 // Health probes the instance. It is the cheapest way to tell "bkn is down"

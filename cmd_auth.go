@@ -106,8 +106,8 @@ func configCmd(fl *flags) {
 			"config": map[string]any{
 				"bkn_url": cfg.BknURL, "provider": cfg.Provider,
 				"provider_url": cfg.ProviderURL, "model": cfg.Model,
-				"timeout_secs": cfg.TimeoutSecs,
-				"token_set":    cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
+				"timeout_secs": cfg.TimeoutSecs, "provider_timeout_secs": cfg.ProviderTimeoutSecs,
+				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
 			},
 		})
 	case "set-profile":
@@ -161,6 +161,10 @@ func applyConfigSet(fl *flags, p *Config) []string {
 	if n := fl.intVal("timeout", 0); n > 0 {
 		p.TimeoutSecs = n
 		changed = append(changed, "timeout_secs")
+	}
+	if n := fl.intVal("provider-timeout", 0); n > 0 {
+		p.ProviderTimeoutSecs = n
+		changed = append(changed, "provider_timeout_secs")
 	}
 	return changed
 }

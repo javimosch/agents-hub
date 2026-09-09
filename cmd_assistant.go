@@ -33,12 +33,14 @@ func assistantCreate(h *hub.Hub, fl *flags) {
 	// --model is a global flag: it also selects an ad-hoc model for one chat
 	// turn, so it is parsed once rather than declared per command.
 	a, err := h.CreateAssistant(hub.Assistant{
-		Name:        fl.str("name"),
-		Model:       fl.model,
-		System:      fl.str("system"),
-		Provider:    fl.str("provider-name"),
-		Temperature: temp,
-		MaxTokens:   fl.intVal("max-tokens", 0),
+		Name:          fl.str("name"),
+		Model:         fl.model,
+		System:        fl.str("system"),
+		Provider:      fl.str("provider-name"),
+		MemoryProject: fl.str("memory-project"),
+		Skills:        splitList(fl.str("skills")),
+		Temperature:   temp,
+		MaxTokens:     fl.intVal("max-tokens", 0),
 	})
 	if err != nil {
 		if !bkn.FromBackend(err) {
@@ -66,6 +68,12 @@ func assistantUpdate(h *hub.Hub, fl *flags) {
 	}
 	if v := fl.str("system"); v != "" {
 		fields["system"] = v
+	}
+	if v := fl.str("memory-project"); v != "" {
+		fields["memory_project"] = v
+	}
+	if v := fl.str("skills"); v != "" {
+		fields["skills"] = splitList(v)
 	}
 	if fl.model != "" {
 		fields["model"] = fl.model
