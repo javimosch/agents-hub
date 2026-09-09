@@ -11,7 +11,8 @@ everything this binary prints follows
 [cli-output-spec](https://cli-specs.intrane.fr/).
 
 ```sh
-go build -o bin/ahub .
+go build -o bin/ahub . && ./bin/ahub install     # or: curl the published binary
+ahub update --check                              # content-hash versioning
 
 ahub setup --admin-token "$BKN_ADMIN_TOKEN"        # once, by a human
 ahub login --email you@example.com --password ...
@@ -208,7 +209,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-177 assertions against a throwaway bkn, a real HTTP provider that echoes its
+196 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -222,10 +223,46 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 |---|---|
 | cli-output-spec | conforms — stream separation, exit codes, typed errors, `help-json` |
 | cli-guide-spec | conforms — embedded `guide`, `--human` renders markdown |
-| cli-update-spec | not yet |
+| cli-update-spec | conforms — `install`/`uninstall` (§6), content-hash `update`, verify-then-swap, passive nudge |
 | cli-feedback-spec | not yet |
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
+
+## Running a flow on a schedule
+
+A flow plus a systemd timer is the whole of autonomy — no daemon, no user in
+the loop:
+
+```ini
+# /etc/systemd/system/ahub-bkn-backup.service
+[Service]
+Type=oneshot
+User=dk1
+ExecStart=/home/dk1/.local/bin/ahub flow run bkn-backup
+```
+
+The flow exits non-zero when a step fails, so a bad run shows up in
+`systemctl list-units --failed` — and because every run is recorded in bkn,
+`ahub flow runs --flow bkn-backup` reads the history back from anywhere.
+
+A machine account needs a credential that outlives its tokens: bkn's refresh
+token is good for 30 days, so a timer running at least monthly never needs the
+password again.
+
+### Publishing a build for other machines
+
+`ahub` has no infrastructure of its own — the artifact lives in a public bkn
+file namespace:
+
+```sh
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o ahub .
+# on the bkn host, once: bkn files ns create ahub --public
+bkn files put ahub ./ahub --name ahub
+bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha256}
+```
+
+Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
+if you'd rather not use bkn for it.
 
 ## What v0.5 is not
 

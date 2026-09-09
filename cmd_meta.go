@@ -24,6 +24,9 @@ func helpJSON() {
 			"chat":      cmd([]string{"[message...]"}, []string{"--assistant <n>", "--message <m>", "--thread <id>", "--model <m>", "--history <n>", "--stream", "--memory-project <p>", "--memory-limit <n>", "--memory-chars <n>", "--memory-required", "--no-memory", "--skill <a,b>", "--skills-required", "--no-skills", "--tools <a,b>", "--allow-writes", "--max-steps <n>", "--no-tools"}, true),
 			"memory":    cmd([]string{"status|recall|save|read|projects", "[id-or-text]"}, []string{"--query <q>", "--text <t>", "--project <p>", "--type <t>", "--tags <a,b>", "--limit <n>", "--format index|full|paths", "--chars <n>"}, false),
 			"tool":      cmd([]string{"list"}, []string{}, false),
+			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
+			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),
+			"uninstall": cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"flow":      cmd([]string{"validate|create|list|show|rm|run|resume|runs", "[name-or-run-id]"}, []string{"--file <path>", "--input <k=v> (repeatable)", "--max-steps <n>", "--step-timeout <s>", "--status <s>", "--limit <n>"}, true),
 			"skill":     cmd([]string{"search|recommend|show", "[name-or-text]"}, []string{"--query <q>", "--task <t>", "--limit <n>"}, false),
 			"guide":     cmd([]string{}, []string{"--human"}, false),
@@ -46,6 +49,7 @@ func helpJSON() {
 			"AHUB_BKN_URL", "AHUB_TOKEN", "AHUB_PROFILE", "AHUB_CONFIG",
 			"AHUB_PROVIDER", "AHUB_PROVIDER_URL", "AHUB_PROVIDER_KEY",
 			"AHUB_MODEL", "AHUB_TIMEOUT", "AHUB_PROVIDER_TIMEOUT", "AHUB_MEMGRAPH",
+			"AHUB_SERVER", "AHUB_UPDATE_URL", "AHUB_NO_NUDGE",
 		},
 		"see_also": map[string]string{
 			"guide":  "ahub guide - the mental model: what to run in what order, and why",

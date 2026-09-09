@@ -481,6 +481,71 @@ a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
 
+# --- install / update ------------------------------------------------------
+# cli-update-spec: a binary already in hand relocates itself, and updates
+# itself by content hash with a verify-then-swap.
+PREFIX="$WORK/bin"
+chk "install copies the binary"       "$PREFIX/ahub" "$(a install --prefix "$PREFIX" | j installed)"
+chk "the copy runs"                   "True"    "$("$PREFIX/ahub" version | j ok)"
+chk "install is idempotent"           "$PREFIX/ahub" "$(a install --prefix "$PREFIX" | j installed)"
+chk "installing over a running copy"  "True"    "$("$PREFIX/ahub" install --prefix "$PREFIX" | j ok)"
+chk "install refuses an unwritable prefix" "90" "$(code install --prefix /proc/nope)"
+chk "and is typed"                    "permission_denied" "$(err_type)"
+chk "uninstall removes it"            "True"    "$(a uninstall --prefix "$PREFIX" | j removed)"
+chk "uninstall twice is a no-op"      "False"   "$(a uninstall --prefix "$PREFIX" | j removed)"
+chk "and still succeeds"              "0"       "$(code uninstall --prefix "$PREFIX")"
+chk "uninstall leaves the config"     "True"    "$([ -f "$AHUB_CONFIG" ] && echo True || echo False)"
+
+# A publisher, served over HTTP. Started WITHOUT a subshell so $! is the
+# server's own pid: `( ... & )` captures the subshell instead, the trap kills
+# nothing, and the orphan squats the port across runs.
+PUB="$WORK/pub"; mkdir -p "$PUB"
+cp "$AHUB" "$PUB/ahub"
+python3 - "$PUB" <<'PYPUB'
+import hashlib, json, sys, pathlib
+d = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256((d / "ahub").read_bytes()).hexdigest()
+(d / "ahub.json").write_text(json.dumps({
+    "ok": True, "version": digest[:12], "download": "/ahub", "sha256": digest}))
+PYPUB
+PUBPORT=$((20000 + RANDOM % 20000))
+python3 -m http.server "$PUBPORT" --directory "$PUB" >/dev/null 2>&1 &
+PUBPID=$!
+trap 'kill $PUBPID 2>/dev/null; cleanup' EXIT
+for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$PUBPORT/ahub.json" >/dev/null && break; sleep 0.1; done
+export AHUB_SERVER="http://127.0.0.1:$PUBPORT" AHUB_UPDATE_URL="http://127.0.0.1:$PUBPORT/ahub.json"
+PUBVER="$(python3 -c "import json;print(json.load(open('$PUB/ahub.json'))['version'])")"
+
+chk "check reports the published hash" "$PUBVER" "$(a update --check | j latest)"
+chk "and sees no update needed"       "False"   "$(a update --check | j update_available)"
+a install --prefix "$PREFIX" >/dev/null
+chk "an up-to-date binary does nothing" "False" "$("$PREFIX/ahub" update | j updated)"
+
+# A tampered artifact must be refused by hash, and the running binary left alone.
+printf 'not a binary' > "$PUB/ahub"
+chk "a mismatched artifact is refused" "110"    "$("$PREFIX/ahub" update --force >/dev/null 2>"$WORK/err"; echo $?)"
+chk "and is typed"                    "verify_failed" "$(err_type)"
+chk "the installed binary still works" "True"   "$("$PREFIX/ahub" version | j ok)"
+
+# A well-formed publish of something that is not this tool: the hash matches,
+# so only actually running it catches the problem.
+printf '#!/bin/sh
+exit 3
+' > "$PUB/ahub"
+python3 - "$PUB" <<'PYPUB'
+import hashlib, json, sys, pathlib
+d = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256((d / "ahub").read_bytes()).hexdigest()
+(d / "ahub.json").write_text(json.dumps({
+    "ok": True, "version": digest[:12], "download": "/ahub", "sha256": digest}))
+PYPUB
+chk "a broken publish fails its smoke test" "110" "$("$PREFIX/ahub" update >/dev/null 2>"$WORK/err"; echo $?)"
+chk "and is typed"                    "smoke_test_failed" "$(err_type)"
+chk "the installed binary survives"   "True"   "$("$PREFIX/ahub" version | j ok)"
+
+kill $PUBPID 2>/dev/null; trap cleanup EXIT
+unset AHUB_SERVER AHUB_UPDATE_URL
+
 # --- token refresh ---------------------------------------------------------
 # A bkn access token is a 15-minute JWT. An agent must not have to notice.
 python3 -c '

@@ -58,6 +58,12 @@ func main() {
 		toolCmd(fl)
 	case "flow":
 		flowCmd(fl)
+	case "update":
+		updateCmd(fl)
+	case "install":
+		installCmd(fl)
+	case "uninstall":
+		uninstallCmd(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"unknown command: "+cmd, "ahub help-json", "ahub guide")
@@ -168,6 +174,9 @@ func usage() {
   ahub flow run <name> [--input k=v]               run it; pauses when it needs input
   ahub flow resume <run-id> --input k=v            continue a paused run
   ahub flow list|show|rm|runs
+
+  ahub install [--prefix <dir>]         put this binary on $PATH
+  ahub update [--check] [--force]       fetch the published build
 
   ahub guide [--human]                  the mental model
   ahub help-json                        the command catalog
