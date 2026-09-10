@@ -44,15 +44,16 @@ stale or wrong, correct it with the scratchpad tool.
 
 // RunScheduleOptions is one autonomous execution.
 type RunScheduleOptions struct {
-	Schedule  Schedule
-	Provider  provider.Provider
-	Registry  *Registry
-	Memory    *MemoryOptions
-	Skills    *SkillOptions
-	Trigger   string
-	Compact   *CompactPolicy
-	Now       time.Time
-	Reschedul bool
+	Schedule    Schedule
+	Provider    provider.Provider
+	Registry    *Registry
+	Memory      *MemoryOptions
+	Skills      *SkillOptions
+	Trigger     string
+	Compact     *CompactPolicy
+	DailyBudget int
+	Now         time.Time
+	Reschedul   bool
 }
 
 // RunSchedule executes one agent and records what happened.
@@ -100,11 +101,12 @@ func (h *Hub) RunSchedule(ctx context.Context, opts RunScheduleOptions) (*Schedu
 		Agent:   asst,
 		Message: a.Prompt,
 		// No history limit is needed: the thread is new, so there is none.
-		Memory:   opts.Memory,
-		Skills:   opts.Skills,
-		Tools:    reg,
-		Compact:  opts.Compact,
-		MaxSteps: a.MaxSteps,
+		Memory:      opts.Memory,
+		Skills:      opts.Skills,
+		Tools:       reg,
+		Compact:     opts.Compact,
+		DailyBudget: opts.DailyBudget,
+		MaxSteps:    a.MaxSteps,
 	})
 	if err != nil {
 		return h.finishScheduleRun(a, run, started, err)

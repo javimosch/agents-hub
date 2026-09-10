@@ -114,6 +114,13 @@ func (e *Engine) run(ctx context.Context, run *Run) {
 		max = 100
 	}
 	for run.Status == StatusRunning {
+		// Checked between steps rather than only inside one: a flow can be
+		// slow because of many quick steps as easily as one long one, and the
+		// step timeout cannot see the difference.
+		if err := ctx.Err(); err != nil {
+			e.fail(run, fmt.Sprintf("flow timed out after %d steps: %v", run.Steps, err))
+			return
+		}
 		if run.Steps >= max {
 			e.fail(run, fmt.Sprintf("stopped after %d steps; the flow may cycle", max))
 			return

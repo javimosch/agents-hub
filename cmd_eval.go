@@ -152,7 +152,7 @@ func evalRun(fl *flags) {
 	}
 	agent := resolveAgent(h, agentName)
 
-	opts := hub.EvalOptions{Scenario: s, Agent: agent}
+	opts := hub.EvalOptions{Scenario: s, Agent: agent, DailyBudget: cfg.DailyTokenBudget}
 	if j := judgeName(fl, s); j != "" {
 		judge := resolveAgent(h, j)
 		opts.Judge = &judge

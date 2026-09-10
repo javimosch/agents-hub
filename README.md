@@ -293,6 +293,29 @@ which one you got:
 **memgraph holds memories and skills** in its own store, by the earlier
 decision to prefer them over RAG.
 
+## Guards for unattended work
+
+Everything here exists because of a run nobody is watching:
+
+```sh
+ahub spend                        # what today cost, against the allowance
+ahub job prune                    # finished jobs and their output, gone after 14 days
+ahub job reap                     # jobs whose supervisor died stop saying "running"
+ahub config set --daily-token-budget 200000
+```
+
+- **One run at a time per schedule.** A tick takes a lease before running, so a
+  5-minute timer and a 4-minute agent can't overlap and race on the same
+  scratchpad. The lease expires after 30 minutes, because a killed process
+  can't release its own.
+- **A daily token ceiling**, checked *before* a turn — a budget enforced
+  afterwards is a report. Counted atomically in bkn with `$inc`, so two
+  machines spending at once can't lose an increment. Refuses with exit 95.
+- **Jobs are reaped and pruned.** A tick marks jobs whose supervisor is gone;
+  `job prune` clears finished ones and their output after `job_retention_days`.
+- **A flow has its own deadline** as well as a per-step one, and the error names
+  which clock ran out.
+
 ## Output contract
 
 stdout is data, stderr is context, and the exit code says what to do next:
@@ -318,7 +341,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-326 assertions against a throwaway bkn, a real HTTP provider that echoes its
+348 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one

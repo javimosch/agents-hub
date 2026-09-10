@@ -115,6 +115,8 @@ func configCmd(fl *flags) {
 				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
 				"allow_tool_cmds": cfg.AllowToolCmds,
 				"model_limits":    cfg.ModelLimits, "compact_at": cfg.CompactAt,
+				"daily_token_budget": cfg.DailyTokenBudget,
+				"job_retention_days": cfg.JobRetentionDays,
 				// Names only. A secret printed to stdout is a secret in every
 				// log that captured the command.
 				"secrets": secretNames(cfg),
@@ -248,6 +250,14 @@ func applyConfigSet(fl *flags, p *Config) (changed []string, asked bool) {
 	for _, hst := range fl.list("deny-host") {
 		p.AllowHosts = without(p.AllowHosts, hst)
 		changed = append(changed, "allow_hosts")
+	}
+	if n := fl.intVal("daily-token-budget", 0); n > 0 {
+		p.DailyTokenBudget = n
+		changed = append(changed, "daily_token_budget")
+	}
+	if n := fl.intVal("job-retention-days", 0); n > 0 {
+		p.JobRetentionDays = n
+		changed = append(changed, "job_retention_days")
 	}
 	if n := fl.intVal("provider-timeout", 0); n > 0 {
 		p.ProviderTimeoutSecs = n

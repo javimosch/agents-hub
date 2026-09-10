@@ -148,6 +148,7 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 	if err != nil {
 		return nil, fmt.Errorf("command %q is allowed but not installed: %w", command, err)
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, lim.timeout())
 	defer cancel()
 
@@ -160,7 +161,9 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("command %q timed out after %s", command, lim.timeout())
+		// Which deadline fired matters: naming the step's budget when the
+		// flow's had already passed sends a reader to tune the wrong number.
+		return nil, deadline(parent, command, lim.timeout())
 	}
 	out := &Output{
 		Text: truncate(stdout.String()),
@@ -178,6 +181,14 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 // returning the exit code. It exists for background jobs, whose output can be
 // far larger than anything worth holding in memory -- and whose consumer
 // reads a tail from the file rather than a string from a variable.
+// deadline says which clock ran out.
+func deadline(parent context.Context, command string, step time.Duration) error {
+	if parent.Err() != nil {
+		return fmt.Errorf("command %q was stopped because the run's deadline passed: %v", command, parent.Err())
+	}
+	return fmt.Errorf("command %q timed out after %s", command, step)
+}
+
 func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w io.Writer) (int, error) {
 	if err := lim.allowed(append([]string{command}, args...)); err != nil {
 		return 0, err
@@ -186,6 +197,7 @@ func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w 
 	if err != nil {
 		return 0, fmt.Errorf("command %q is allowed but not installed: %w", command, err)
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, lim.timeout())
 	defer cancel()
 
@@ -194,7 +206,7 @@ func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w 
 	cmd.Stdin = nil
 	err = cmd.Run()
 	if ctx.Err() != nil {
-		return 0, fmt.Errorf("command %q timed out after %s", command, lim.timeout())
+		return 0, deadline(parent, command, lim.timeout())
 	}
 	if cmd.ProcessState != nil {
 		return cmd.ProcessState.ExitCode(), nil

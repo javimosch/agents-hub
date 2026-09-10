@@ -24,12 +24,45 @@ func jobCmd(fl *flags) {
 		jobStop(fl)
 	case "start", "run":
 		jobStart(fl)
+	case "prune":
+		jobPrune(fl)
+	case "reap":
+		jobReap(fl)
 	case "_exec":
 		jobExec(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"job takes list, show, output, wait, stop, start")
 	}
+}
+
+// jobPrune removes finished jobs and their output. A tool that budgets other
+// people's disks should not quietly fill its own.
+func jobPrune(fl *flags) {
+	h, cfg := hubFor(fl)
+	days := fl.intVal("older-than-days", cfg.JobRetentionDays)
+	if days <= 0 {
+		days = 14
+	}
+	jobs, bytes, err := h.PruneJobs(time.Duration(days)*24*time.Hour, fl.has("dry-run"))
+	if err != nil {
+		fail(err, "prune jobs")
+	}
+	out.Data(map[string]any{
+		"pruned": jobs, "bytes_freed": bytes,
+		"older_than_days": days, "dry_run": fl.has("dry-run"),
+	})
+}
+
+// jobReap marks jobs whose supervisor is gone, so nothing says "running"
+// forever because a process was killed.
+func jobReap(fl *flags) {
+	h, _ := hubFor(fl)
+	n, err := h.ReapJobs(time.Duration(fl.intVal("grace", 60)) * time.Second)
+	if err != nil {
+		fail(err, "reap jobs")
+	}
+	out.Data(map[string]any{"reaped": n})
 }
 
 func jobList(fl *flags) {

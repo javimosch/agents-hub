@@ -158,6 +158,9 @@ type EvalOptions struct {
 	// cost real money; a caller that learns nothing until the end cannot stop
 	// it when the first three cases already show the answer.
 	OnCase func(CaseResult)
+	// DailyBudget stops a scenario part-way rather than spending past the
+	// day's allowance. An eval is the easiest way to spend a lot quickly.
+	DailyBudget int
 }
 
 // RunEval executes every case and scores it.
@@ -187,6 +190,7 @@ func (h *Hub) RunEval(ctx context.Context, opts EvalOptions) (*EvalRun, error) {
 		turn, err := h.Chat(ctx, opts.Provider, ChatOptions{
 			Agent: opts.Agent, Message: c.Message,
 			Memory: opts.Memory, Skills: opts.Skills, Tools: opts.Registry,
+			DailyBudget: opts.DailyBudget,
 		})
 		if err != nil {
 			// A case that could not run is a failure, not a skip. Counting it

@@ -85,6 +85,10 @@ type ChatOptions struct {
 	// size has crossed the threshold, and again if the provider refuses the
 	// prompt anyway.
 	Compact *CompactPolicy
+	// DailyBudget refuses a turn once the day's token allowance is spent, and
+	// records what this turn cost. Zero means unlimited, which is the right
+	// default for a person at a terminal and the wrong one for a schedule.
+	DailyBudget int
 }
 
 // SkillOptions is the set of skills to load for this turn.
@@ -123,6 +127,12 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 
 	if opts.NoStore {
 		return h.oneShot(ctx, p, opts)
+	}
+
+	if opts.DailyBudget > 0 {
+		if err := h.CheckBudget(opts.DailyBudget); err != nil {
+			return nil, err
+		}
 	}
 
 	th := opts.Thread
@@ -315,6 +325,14 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 
 		if len(resp.ToolCalls) == 0 {
 			turn.Reply = asstMsg
+			if opts.DailyBudget > 0 {
+				// Recorded after the turn, whatever it cost: a budget that
+				// only counted cheap turns would let an expensive one through
+				// every day.
+				if err := h.RecordSpend(turn.Usage.TotalTokens); err != nil {
+					return turn, nil
+				}
+			}
 			return turn, nil
 		}
 		if opts.Tools == nil {

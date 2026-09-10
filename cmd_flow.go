@@ -208,7 +208,12 @@ func flowRun(fl *flags, resumeID string) {
 		engine.Ask = h.Asker(p, hub.ChatOptions{HistoryLimit: 100})
 	}
 
-	ctx := context.Background()
+	// A flow gets a deadline of its own. Step timeouts bound one command; a
+	// flow can run long through many quick steps instead, and an unattended
+	// run with no ceiling is a process nobody reaps.
+	ctx, cancel := context.WithTimeout(context.Background(),
+		time.Duration(fl.intVal("timeout", 1800))*time.Second)
+	defer cancel()
 	if resumeID == "" {
 		run = flow.NewRun(f, inputs)
 		engine.Start(ctx, run)

@@ -106,6 +106,10 @@
     {
       "command": "ahub model list",
       "why": "Context windows, shared through bkn. One machine learns a window from a refused call and the rest already know it."
+    },
+    {
+      "command": "ahub spend",
+      "why": "What today has cost against the day's allowance. The counter is in bkn (a fact), the allowance is in the profile (a decision)."
     }
   ],
   "concepts": [
@@ -208,6 +212,10 @@
     {
       "name": "what lives where",
       "what": "bkn holds everything that should travel: agents, threads, flows, schedules, evals, jobs, and what has been learned about models. The local profile holds what should NOT travel -- your token, your provider key, your secrets, and the allowlists -- because a credential and a capability grant are policies of one machine, and a new machine must not inherit them by logging in. memgraph holds memories and skills in its own store."
+    },
+    {
+      "name": "guards for unattended work",
+      "what": "A schedule takes a lease before it runs, so a timer and a slow run cannot overlap; the lease expires (30m) because a killed process cannot release its own. A tick also reaps jobs whose supervisor is gone. `ahub job prune` removes finished jobs and their output. A daily token budget refuses a turn BEFORE it spends, counted atomically in bkn. A flow has its own deadline as well as a per-step one."
     }
   ],
   "gotchas": [
@@ -256,7 +264,10 @@
     "A conditional reads its variable by name, so an unset one compares as empty rather than failing the way a template does. Declare optional variables in the flow's `inputs` list; anything else that no step sets is reported by validate.",
     "An allowlist entry is a whole-field prefix: 'sudo journalctl' permits `sudo journalctl --vacuum-size=250M` and refuses `sudo rm`. A one-word entry behaves as it always did, allowing any arguments -- which is why 'sudo' alone should never be one.",
     "A context window learned from a provider's refusal is written to bkn, not the profile: it is a fact about the model. An explicit --model-limit in the profile is an override and still wins.",
-    "A job's output tail (16 KB) is stored with its record so another machine can read it; the full log stays where it ran. `ahub job output` says which one you got -- \"local file (complete)\" or \"recorded tail (portable)\"."
+    "A job's output tail (16 KB) is stored with its record so another machine can read it; the full log stays where it ran. `ahub job output` says which one you got -- \"local file (complete)\" or \"recorded tail (portable)\".",
+    "A schedule that appears not to run may be leased: `ahub schedule show <name>` shows who holds it. A lease is released after the run and expires after 30 minutes if the holder died.",
+    "The daily budget is checked before a turn, not after -- a budget enforced afterwards is a report. It refuses with exit 95 budget_spent, because the state conflicts with the request rather than the request being wrong.",
+    "`ahub flow run --timeout` bounds the whole flow; --step-timeout bounds one command. When a command is stopped, the error names which of the two clocks ran out."
   ],
   "recipes": [
     {

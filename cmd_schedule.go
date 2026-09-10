@@ -133,14 +133,40 @@ func scheduleDue(fl *flags) {
 // entry point, however many agents, and no daemon holding state between them.
 func scheduleTick(fl *flags) {
 	h, cfg := hubFor(fl)
+	// Jobs first: a supervisor that died leaves a record saying "running"
+	// forever, and a tick is the only thing that comes round regularly enough
+	// to notice.
+	if reaped, rerr := h.ReapJobs(time.Minute); rerr == nil && reaped > 0 {
+		out.Log("marked %d job(s) failed whose supervisor had gone", reaped)
+	}
+
 	due, err := h.DueSchedules(time.Now().UTC())
 	if err != nil {
 		fail(err, "list due schedules")
 	}
 	results := []map[string]any{}
-	failed := 0
+	failed, skipped := 0, 0
+	owner := hub.Owner()
 	for _, a := range due {
+		// One run at a time per schedule. A five-minute timer and a
+		// four-minute agent overlap on the fifth minute otherwise, and the
+		// two runs would race on the same scratchpad.
+		lease, lerr := h.AcquireLease(a.ID, owner, time.Duration(fl.intVal("lease-ttl", 1800))*time.Second)
+		if lerr != nil {
+			fail(lerr, "take a lease on "+a.Name)
+		}
+		if !lease.Held {
+			skipped++
+			results = append(results, map[string]any{
+				"schedule": a.Name, "status": "skipped",
+				"held_by": lease.HeldBy, "lease_expires": lease.Expires.UTC().Format(time.RFC3339),
+			})
+			continue
+		}
 		run := executeSchedule(h, cfg, fl, a, "schedule")
+		if rerr := h.ReleaseLease(a.ID); rerr != nil {
+			out.Log("ran %s but could not release its lease: %v", a.Name, rerr)
+		}
 		if run.Status != "ok" {
 			failed++
 		}
@@ -149,7 +175,8 @@ func scheduleTick(fl *flags) {
 			"steps": run.Steps, "tokens": run.Tokens, "error": run.Error,
 		})
 	}
-	fields := map[string]any{"ran": len(results), "failed": failed, "runs": results}
+	fields := map[string]any{"ran": len(results) - skipped, "failed": failed,
+		"skipped": skipped, "runs": results}
 	if failed > 0 {
 		// A timer that always exits 0 is a timer nobody looks at. One failed
 		// agent makes the whole tick visible in `systemctl --failed`, while
@@ -164,7 +191,21 @@ func scheduleTick(fl *flags) {
 func scheduleRunOne(fl *flags) {
 	h, cfg := hubFor(fl)
 	a := resolveSchedule(h, scheduleRef(fl))
+	// A manual run takes the same lease, so `schedule run` while a timer is
+	// mid-run waits its turn rather than doubling up.
+	lease, lerr := h.AcquireLease(a.ID, hub.Owner(), time.Duration(fl.intVal("lease-ttl", 1800))*time.Second)
+	if lerr != nil {
+		fail(lerr, "take a lease")
+	}
+	if !lease.Held {
+		out.Fail(out.Conflict, "already_running",
+			"schedule "+a.Name+" is already running, held by "+lease.HeldBy,
+			"wait for it, or `ahub schedule show "+a.Name+"` to see the lease")
+	}
 	run := executeSchedule(h, cfg, fl, a, "manual")
+	if rerr := h.ReleaseLease(a.ID); rerr != nil {
+		out.Log("could not release the lease: %v", rerr)
+	}
 	fields := map[string]any{
 		"run": run.ID, "schedule": run.Schedule, "status": run.Status,
 		"steps": run.Steps, "tokens": run.Tokens, "thread": run.Thread,
@@ -187,7 +228,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 		out.Fail(out.InvalidValue, "invalid_value", err.Error())
 	}
 	opts := hub.RunScheduleOptions{Schedule: a, Provider: p, Trigger: trigger,
-		Compact: compactionFor(fl, cfg, h)}
+		Compact: compactionFor(fl, cfg, h), DailyBudget: cfg.DailyTokenBudget}
 
 	// memgraph is needed only if this agent asked for tools, skills or a
 	// memory project. An agent that asked for none must still run on a
@@ -232,7 +273,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 
 func scheduleRuns(fl *flags) {
 	h, _ := hubFor(fl)
-	list, err := h.ListScheduleRuns(fl.str("agent"), fl.str("status"), fl.intVal("limit", 20))
+	list, err := h.ListScheduleRuns(fl.str("schedule"), fl.str("status"), fl.intVal("limit", 20))
 	if err != nil {
 		fail(err, "list schedule runs")
 	}

@@ -41,6 +41,12 @@ type Config struct {
 	// CompactAt is the fraction of the window at which a thread is folded
 	// down. Zero means the default.
 	CompactAt float64 `json:"compact_at,omitempty"`
+	// DailyTokenBudget caps what unattended work may spend in a day. It is a
+	// policy of this machine -- the counter it is measured against lives in
+	// bkn, because spending is a fact and the allowance is a decision.
+	DailyTokenBudget int `json:"daily_token_budget,omitempty"`
+	// JobRetentionDays is how long finished jobs and their output survive.
+	JobRetentionDays int `json:"job_retention_days,omitempty"`
 
 	// AllowCmds and AllowHosts are what a flow step may reach on this
 	// machine. They live here, in a file the operator owns, and never in a
@@ -169,9 +175,13 @@ func resolve(fl *flags) (Config, string, error) {
 	if c.JobTimeoutSecs == 0 {
 		c.JobTimeoutSecs = 3600
 	}
+	if c.JobRetentionDays == 0 {
+		c.JobRetentionDays = 14
+	}
 	envInt("AHUB_TIMEOUT", &c.TimeoutSecs)
 	envInt("AHUB_PROVIDER_TIMEOUT", &c.ProviderTimeoutSecs)
 	envInt("AHUB_JOB_TIMEOUT", &c.JobTimeoutSecs)
+	envInt("AHUB_DAILY_TOKEN_BUDGET", &c.DailyTokenBudget)
 	return c, name, nil
 }
 

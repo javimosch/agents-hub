@@ -78,7 +78,7 @@ chk "no token is typed"               "not_authenticated" "$(err_type)"
 
 # --- setup and login -------------------------------------------------------
 "$BKN" auth user create dev@hub.test --password hunter2hunter2 --role admin >/dev/null 2>&1
-chk "setup declares every collection" "11"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
+chk "setup declares every collection" "12"       "$(a setup --admin-token "$BKN_ADMIN_TOKEN" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["collections"]))')"
 chk "setup without admin token fails" "82"      "$(code setup)"
 chk "login stores a profile"          "dev@hub.test" "$(a login --email dev@hub.test --password hunter2hunter2 | j email)"
 chk "whoami answers"                  "dev@hub.test" "$(a whoami | j me.user.email)"
@@ -671,6 +671,73 @@ chkin "and the content is still there"  "40"     "$(a job output "$JO" | j outpu
 chk "the exit code was never local"    "0"       "$(a job show "$JO" | j job.exit_code)"
 mv "$OF.gone" "$OF"
 
+# --- guards against unattended failure --------------------------------------
+# Everything here is about a run nobody is watching: two timers overlapping, a
+# supervisor killed, output piling up, a budget with no ceiling, a flow that
+# never ends.
+patch_store() { # patch_store <coll> <id> <json>
+  curl -s -X PATCH -H "Authorization: Bearer $(python3 -c "
+import json,sys;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")" \
+    -H 'Content-Type: application/json' -d "$3" "$B/v1/store/hub/$1/$2" >/dev/null
+}
+
+a agent create --name guarded --model m1 --system short >/dev/null
+a schedule create --name guardsched --agent guarded --prompt hello --every 1h >/dev/null
+GS="$(a schedule show guardsched | j schedule.id)"
+
+# 1. one run at a time per schedule
+patch_store schedules "$GS" '{"lease":"otherhost:999|2099-01-01T00:00:00Z"}'
+chk "a held schedule refuses a manual run" "95" "$(code schedule run guardsched)"
+chk "and says who holds it"            "already_running" "$(err_type)"
+patch_store schedules "$GS" '{"next_run_at":"2020-01-01T00:00:00Z"}'
+TK="$(a schedule tick)"
+chk "tick skips a held schedule"      "1"       "$(printf '%s' "$TK" | j skipped)"
+chk "and runs nothing"                "0"       "$(printf '%s' "$TK" | j ran)"
+chkin "naming the holder"             "otherhost:999" "$(printf '%s' "$TK" | j runs.0.held_by)"
+
+# An expired lease is taken over: a process that died cannot release its own.
+patch_store schedules "$GS" '{"lease":"deadhost:1|2020-01-01T00:00:00Z","next_run_at":"2020-01-01T00:00:00Z"}'
+TK2="$(a schedule tick)"
+chk "an expired lease is taken over"  "1"       "$(printf '%s' "$TK2" | j ran)"
+chk "and released afterwards"         ""        "$(a schedule show guardsched | j schedule.lease)"
+
+# 2. jobs whose supervisor is gone do not say "running" forever
+JR="$(curl -s -X POST -H "Authorization: Bearer $(python3 -c "
+import json,sys;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")" \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"seq","status":"running","started_at":"2020-01-01T00:00:00Z","created_at":"2020-01-01T00:00:00Z"}' \
+  "$B/v1/store/hub/jobs" | j record.id)"
+chk "a never-started job is reaped"   "1"       "$(a job reap | j reaped)"
+chk "and marked failed"               "failed"  "$(a job show "$JR" | j job.status)"
+chkin "with the reason"               "never started" "$(a job show "$JR" | j job.error)"
+chk "reaping again finds nothing"     "0"       "$(a job reap | j reaped)"
+
+# 3. finished jobs and their output do not accumulate forever
+chk "a dry run prunes nothing"        "True"    "$(a job prune --dry-run | j dry_run)"
+patch_store jobs "$JR" '{"finished_at":"2020-01-01T00:00:00Z"}'
+chk "an old job is pruned"            "1"       "$(a job prune | j pruned)"
+chk "and is gone"                     "92"      "$(code job show "$JR")"
+
+# 4. a day's spending has a ceiling, counted atomically in bkn
+a config set --daily-token-budget 40 >/dev/null
+SP0="$(a spend | j tokens)"
+a chat --agent guarded --message "costs something" >/dev/null
+chk "a turn is counted"               "True"    "$(a spend | python3 -c "import json,sys;print(json.load(sys.stdin)['tokens'] > $SP0)")"
+chk "the budget is reported"          "40"      "$(a spend | j budget)"
+for i in 1 2 3 4 5 6 7 8; do a chat --agent guarded --message "more" >/dev/null 2>&1; done
+chk "past the ceiling a turn is refused" "95"   "$(code chat --agent guarded --message "one too many")"
+chk "and is typed"                    "budget_spent" "$(err_type)"
+chkin "and says how to raise it"      "--daily-token-budget" "$(errj error.suggestions.0)"
+a config set --daily-token-budget 100000000 >/dev/null
+
+# 5. a flow has a deadline of its own, and the right clock is named
+a config set --allow-cmd sleep >/dev/null
+printf '%s' '{"name":"slowflow","start":"a","steps":{"a":{"type":"cmd","command":"sleep","args":["5"],"var":"o","next":"b"},"b":{"type":"end"}}}' > "$WORK/slow.json"
+a flow create --file "$WORK/slow.json" >/dev/null
+chk "a flow deadline stops it"        "105"     "$(code flow run slowflow --timeout 1)"
+chkin "naming the run's deadline"     "run's deadline passed" "$(errj error.message)"
+chkin "and a step budget names itself" "timed out after 1s" "$(code flow run slowflow --step-timeout 1 --timeout 60 >/dev/null; errj error.message)"
+
 # --- evals -----------------------------------------------------------------
 # The measurement half. Without it every other change here is an opinion.
 cat > "$WORK/quality.json" <<'EVAL'
@@ -790,7 +857,7 @@ chk "a sub-minute interval is refused" "85"     "$(code schedule create --name a
 AG="$(a schedule create --name nightly --agent helper --prompt "check the port" --every 6h)"
 chk "create schedules the first run"  "True"    "$(printf '%s' "$AG" | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["schedule"]["next_run_at"]))')"
 chk "and it is enabled"               "True"    "$(printf '%s' "$AG" | j schedule.enabled)"
-chk "it is listed"                    "nightly" "$(a schedule list | j schedules.0.name)"
+chk "it is listed"                    "True"    "$(a schedule list | python3 -c 'import json,sys;print(any(x["name"]=="nightly" for x in json.load(sys.stdin)["schedules"]))')"
 chk "nothing is due yet"              "0"       "$(a schedule due | j count)"
 
 R1="$(a schedule run nightly)"

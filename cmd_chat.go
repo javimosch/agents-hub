@@ -78,6 +78,7 @@ func chatCmd(fl *flags) {
 		Skills:       skillsFor(fl, a),
 		Tools:        toolsFor(fl, cfg, h, a),
 		Compact:      compactionFor(fl, cfg, h),
+		DailyBudget:  cfg.DailyTokenBudget,
 		MaxSteps:     fl.intVal("max-steps", 0),
 	}
 	if fl.stream {
@@ -95,6 +96,15 @@ func chatCmd(fl *flags) {
 	if err != nil {
 		if bkn.FromBackend(err) {
 			fail(err, "chat")
+		}
+		var overspent *hub.BudgetError
+		if errors.As(err, &overspent) {
+			// Not a provider problem and not worth retrying today. 95 says
+			// "the state conflicts with what you asked", which is exactly
+			// what a spent budget is.
+			out.Fail(out.Conflict, "budget_spent", err.Error(),
+				"raise it with `ahub config set --daily-token-budget <n>`, or wait for tomorrow",
+				"ahub spend")
 		}
 		if strings.HasPrefix(err.Error(), "model requested tools") {
 			out.Fail(out.ValidationError, "tools_disabled", err.Error(),
