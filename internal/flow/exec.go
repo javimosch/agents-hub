@@ -141,6 +141,11 @@ type Output struct {
 // so an exit code is a typed answer the flow can branch on: 105 means retry,
 // 82 means the arguments were wrong, 92 means it is not there.
 func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdin string) (*Output, error) {
+	return RunCmdIn(ctx, lim, command, args, stdin, "")
+}
+
+// RunCmdIn runs a command in a given directory.
+func RunCmdIn(ctx context.Context, lim Limits, command string, args []string, stdin, dir string) (*Output, error) {
 	if err := lim.allowed(append([]string{command}, args...)); err != nil {
 		return nil, err
 	}
@@ -153,6 +158,7 @@ func RunCmd(ctx context.Context, lim Limits, command string, args []string, stdi
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = dir
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

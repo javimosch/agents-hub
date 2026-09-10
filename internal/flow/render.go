@@ -15,7 +15,7 @@ var varRe = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}`)
 // Refs lists every variable a step reads, for the validator.
 func Refs(s Step) []string {
 	seen := map[string]bool{}
-	for _, field := range []string{s.Value, s.Text, s.Prompt, s.URL, s.Body, s.Stdin, s.Input} {
+	for _, field := range []string{s.Value, s.Text, s.Prompt, s.URL, s.Body, s.Stdin, s.Input, s.Dir} {
 		for _, m := range varRe.FindAllStringSubmatch(field, -1) {
 			seen[m[1]] = true
 		}

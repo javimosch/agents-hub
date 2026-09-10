@@ -255,9 +255,11 @@ func (e *Engine) doIO(ctx context.Context, run *Run, name string, s Step, r Rend
 		var args []string
 		args, err = r.RenderAll(s.Args)
 		if err == nil {
-			var stdin string
+			var stdin, dir string
 			if stdin, err = r.Render(s.Stdin); err == nil {
-				out, err = RunCmd(ctx, e.Limits, s.Command, args, stdin)
+				if dir, err = r.Render(s.Dir); err == nil {
+					out, err = RunCmdIn(ctx, e.Limits, s.Command, args, stdin, dir)
+				}
 			}
 		}
 	} else {

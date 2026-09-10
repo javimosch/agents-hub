@@ -77,6 +77,11 @@ type Step struct {
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
 	Stdin   string   `json:"stdin,omitempty"`
+	// Dir is where the command runs. Many CLIs resolve their configuration
+	// relative to the working directory, so a flow without this one silently
+	// depends on wherever it was started -- which a timer does not control and
+	// a person running it by hand gets wrong.
+	Dir string `json:"dir,omitempty"`
 
 	// http
 	Method  string            `json:"method,omitempty"`
