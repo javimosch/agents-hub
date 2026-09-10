@@ -126,10 +126,15 @@ func (l Limits) timeout() time.Duration {
 
 // Output is what a cmd or http step produced.
 type Output struct {
-	Text   string
-	Code   int    // exit status, or HTTP status
-	Err    string // stderr, or an error line
-	Parsed any    // set when parse: json succeeded
+	Text string
+	// Truncated says the command produced more than maxOut bytes. It matters
+	// for parse: a truncated buffer is never valid JSON, and the parser's
+	// complaint about the content would otherwise send the reader hunting for
+	// a syntax error that is not there.
+	Truncated bool
+	Code      int    // exit status, or HTTP status
+	Err       string // stderr, or an error line
+	Parsed    any    // set when parse: json succeeded
 }
 
 // RunCmd executes an allowlisted command.
@@ -172,8 +177,9 @@ func RunCmdIn(ctx context.Context, lim Limits, command string, args []string, st
 		return nil, deadline(parent, command, lim.timeout())
 	}
 	out := &Output{
-		Text: truncate(stdout.String()),
-		Err:  truncate(stderr.String()),
+		Text:      truncate(stdout.String()),
+		Truncated: len(stdout.String()) > maxOut,
+		Err:       truncate(stderr.String()),
 	}
 	if cmd.ProcessState != nil {
 		out.Code = cmd.ProcessState.ExitCode()
@@ -291,6 +297,10 @@ func ParseOutput(o *Output, mode string) error {
 	}
 	var v any
 	if err := json.Unmarshal([]byte(o.Text), &v); err != nil {
+		if o.Truncated {
+			return fmt.Errorf("output was %dKiB, over the %dKiB cap, so it was truncated and cannot be parsed as JSON -- narrow the command's output instead",
+				len(o.Text)/1024, maxOut/1024)
+		}
 		return fmt.Errorf("output was not JSON: %w", err)
 	}
 	o.Parsed = v
