@@ -16,7 +16,7 @@ func helpJSON() {
 		"output":  "json",
 		"commands": map[string]any{
 			"setup":     cmd([]string{}, []string{"--admin-token <t>", "--bkn <url>"}, false),
-			"login":     cmd([]string{}, []string{"--email <e>", "--password <p>", "--org <o>"}, false),
+			"login":     cmd([]string{}, []string{"--email <e>", "--password <p>", "--password-stdin", "--org <o>"}, false),
 			"whoami":    cmd([]string{}, []string{}, true),
 			"config":    cmd([]string{"show|set|set-profile"}, []string{"--profile <n>", "--bkn <url>", "--provider <n>", "--provider-url <url>", "--provider-key <k>", "--model <m>", "--timeout <s>", "--provider-timeout <s>", "--allow-tool-cmd <prefix>", "--deny-tool-cmd <prefix>", "--model-limit <model=tokens>", "--compact-at <0.6>", "--allow-cmd <c>", "--deny-cmd <c>", "--allow-host <h>", "--deny-host <h>", "--secret <NAME=v>"}, false),
 			"agent":     cmd([]string{"create|list|get|update|rm", "[name-or-id]"}, []string{"--name <n>", "--model <m>", "--system <s>", "--provider-name <p>", "--memory-project <p>", "--skills <a,b>", "--tools <a,b>", "--temperature <f>", "--max-tokens <n>", "--limit <n>"}, true),

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,9 +53,19 @@ func loginCmd(fl *flags) {
 		out.Fail(out.ValidationError, "config_error", err.Error())
 	}
 	email, password := fl.str("email"), fl.str("password")
+	if fl.has("password-stdin") {
+		// Read from stdin so the credential never appears in an argument
+		// list, where anything on the machine can read it out of /proc.
+		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+		if err != nil {
+			out.Fail(out.ValidationError, "validation_error", "could not read the password from stdin")
+		}
+		password = strings.TrimRight(string(raw), "\r\n")
+	}
 	if email == "" || password == "" {
 		out.Fail(out.ValidationError, "validation_error",
-			"--email and --password are required")
+			"--email and a password are required",
+			"ahub login --email you@example.com --password-stdin  < a file, or a pipe")
 	}
 	c := bkn.New(cfg.BknURL, "", cfg.timeout())
 	tokens, err := c.Login(email, password, fl.str("org"))
