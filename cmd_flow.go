@@ -146,6 +146,17 @@ func flowDelete(fl *flags) {
 
 func flowRuns(fl *flags) {
 	h, _ := hubFor(fl)
+	// A scheduled flow's whole output is the messages it produced, and the
+	// listing cannot carry them. Without this the answer to "what did the 3am
+	// run say" is stored and unreachable.
+	if id := fl.str("run"); id != "" {
+		r, err := h.GetRun(id)
+		if err != nil {
+			fail(err, "load run")
+		}
+		out.Data(map[string]any{"run": r})
+		return
+	}
 	list, err := h.ListRuns(fl.str("flow"), fl.str("status"), fl.intVal("limit", 20))
 	if err != nil {
 		fail(err, "list runs")

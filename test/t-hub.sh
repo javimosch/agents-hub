@@ -347,6 +347,9 @@ RES="$(a flow resume "$RUN" --input who=vip)"
 chk "resume completes it"             "completed" "$(printf '%s' "$RES" | j status)"
 chkin "the right branch was taken"    "VIP: hello vip" "$(printf '%s' "$RES" | j messages.0)"
 chk "resuming a finished run is a conflict" "95" "$(code flow resume "$RUN" --input who=x)"
+chkin "one run reads back with its messages" "VIP: hello vip" "$(a flow runs --run "$RUN" | j run.messages.0)"
+chk "and with its status"             "completed" "$(a flow runs --run "$RUN" | j run.status)"
+chk "an unknown run id is not found"  "92"      "$(code flow runs --run 01NOSUCHRUN00000000000000)"
 
 # The whole argument for the feature, asserted rather than claimed.
 DET="$(a flow run wizard --input who=ada)"
