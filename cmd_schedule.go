@@ -164,8 +164,8 @@ func scheduleTick(fl *flags) {
 			})
 			continue
 		}
-		run := executeSchedule(h, cfg, fl, a, "schedule")
-		if rerr := h.ReleaseLease(a.ID); rerr != nil {
+		run := executeSchedule(h, cfg, fl, a, "schedule", &lease)
+		if rerr := h.ReleaseLease(a.ID, lease); rerr != nil {
 			out.Log("ran %s but could not release its lease: %v", a.Name, rerr)
 		}
 		if run.Status != "ok" {
@@ -203,8 +203,8 @@ func scheduleRunOne(fl *flags) {
 			"schedule "+a.Name+" is already running, held by "+lease.HeldBy,
 			"wait for it, or `ahub schedule show "+a.Name+"` to see the lease")
 	}
-	run := executeSchedule(h, cfg, fl, a, "manual")
-	if rerr := h.ReleaseLease(a.ID); rerr != nil {
+	run := executeSchedule(h, cfg, fl, a, "manual", &lease)
+	if rerr := h.ReleaseLease(a.ID, lease); rerr != nil {
 		out.Log("could not release the lease: %v", rerr)
 	}
 	fields := map[string]any{
@@ -223,9 +223,10 @@ func scheduleRunOne(fl *flags) {
 // executeSchedule runs one schedule and records what happened. Nothing here
 // may exit: the caller holds the lease, and an exit would leave it held with no
 // run recorded.
-func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger string) *hub.ScheduleRun {
+func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger string, lease *hub.Lease) *hub.ScheduleRun {
 	opts := hub.RunScheduleOptions{Schedule: a, Trigger: trigger,
-		Compact: compactionFor(fl, cfg, h), DailyBudget: cfg.DailyTokenBudget}
+		KeepAlive: func() error { return h.RenewLease(lease) },
+		Compact:   compactionFor(fl, cfg, h), DailyBudget: cfg.DailyTokenBudget}
 	opts.SetupError = setUpSchedule(h, cfg, fl, a, &opts)
 	run, err := h.RunSchedule(context.Background(), opts)
 	if err != nil {

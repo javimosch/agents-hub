@@ -141,7 +141,16 @@ func (h *Hub) Compact(ctx context.Context, p provider.Provider, th *Thread, a Ag
 		rep.Error = "nothing to compact: the conversation is already short"
 		return rep, nil
 	}
-	fold := history[:len(history)-keep]
+	// A call and its results are folded or kept together.
+	cut := len(history) - keep
+	for cut > 0 && history[cut].Role == provider.RoleTool {
+		cut--
+	}
+	if cut == 0 {
+		rep.Error = "nothing to compact: what is left is one tool exchange"
+		return rep, nil
+	}
+	fold := history[:cut]
 
 	// The summariser is the same agent, with its tools and memory removed:
 	// summarising is not a task that should be able to call anything.

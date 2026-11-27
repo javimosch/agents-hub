@@ -320,6 +320,28 @@ func (c *Client) Patch(ref, id string, doc map[string]any) (Record, error) {
 	return out.Record, err
 }
 
+// PatchIf is Patch, applied only while field still equals want. bkn checks and
+// writes in one step.
+func (c *Client) PatchIf(ref, id string, doc map[string]any, field, want string) (Record, error) {
+	var out struct {
+		Record Record `json:"record"`
+	}
+	q := url.Values{"if": {field + "=" + want}}
+	err := c.do(http.MethodPatch, "/v1/store/"+ref+"/"+url.PathEscape(id)+"?"+q.Encode(), doc, &out)
+	return out.Record, err
+}
+
+// GuardFailed reports that a PatchIf condition did not hold. bkn answers 409,
+// or 404 on an owner-scoped collection, where it will not confirm that a record
+// the caller may not see exists.
+func GuardFailed(err error) bool {
+	var e *APIError
+	if !asAPI(err, &e) {
+		return false
+	}
+	return e.Status == http.StatusConflict || e.Status == http.StatusNotFound
+}
+
 // ScriptResult is what a script run returned.
 type ScriptResult struct {
 	OK    bool           `json:"ok"`

@@ -713,6 +713,13 @@ import json,sys;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['to
     -H 'Content-Type: application/json' -d "$3" "$B/v1/store/hub/$1/$2" >/dev/null
 }
 
+# The lock is not part of any command's output, so it is read from the store.
+lease_of() { # lease_of <schedule-id>
+  curl -s -H "Authorization: Bearer $(python3 -c "
+import json,sys;print(json.load(open('$AHUB_CONFIG'))['profiles']['default']['token'])")" \
+    "$B/v1/store/hub/schedules/$1" | j record.lease
+}
+
 a agent create --name guarded --model m1 --system short >/dev/null
 a schedule create --name guardsched --agent guarded --prompt hello --every 1h >/dev/null
 GS="$(a schedule show guardsched | j schedule.id)"
@@ -731,7 +738,7 @@ chkin "naming the holder"             "otherhost:999" "$(printf '%s' "$TK" | j r
 patch_store schedules "$GS" '{"lease":"deadhost:1|2020-01-01T00:00:00Z","next_run_at":"2020-01-01T00:00:00Z"}'
 TK2="$(a schedule tick)"
 chk "an expired lease is taken over"  "1"       "$(printf '%s' "$TK2" | j ran)"
-chk "and released afterwards"         ""        "$(a schedule show guardsched | j schedule.lease)"
+chk "and released afterwards"         ""        "$(lease_of "$GS")"
 
 # 2. jobs whose supervisor is gone do not say "running" forever
 JR="$(curl -s -X POST -H "Authorization: Bearer $(python3 -c "
@@ -965,9 +972,43 @@ a schedule create --name needsmg --agent guarded --prompt hi --every 1h --tools 
 patch_store schedules "$(a schedule show needsmg | j schedule.id)" '{"next_run_at":"2020-01-01T00:00:00Z"}'
 chk "a schedule that cannot start fails the tick" "105" "$(AHUB_MEMGRAPH=/nonexistent code schedule tick)"
 chk "and leaves a failed run"         "1"       "$(a schedule runs --schedule needsmg --status failed | j count)"
-chk "and releases its lease"          ""        "$(a schedule show needsmg | j schedule.lease)"
+chk "and releases its lease"          ""        "$(lease_of "$(a schedule show needsmg | j schedule.id)")"
 TK3="$(AHUB_MEMGRAPH=/nonexistent a schedule tick)"
 chk "and is not reported as held"     "0"       "$(printf '%s' "$TK3" | j skipped)"
+
+# --- crashes and collisions --------------------------------------------------
+# A real process, really killed, part way through a tool call.
+provider_ctl() { curl -s -X POST "$P/control/$1" -d "$2" >/dev/null; }
+until_in() { for _ in $(seq 1 100); do grep -q "$1" "$2" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+a config set --allow-tool-cmd "sleep 4" >/dev/null
+provider_ctl tool '{"tool":"cmd","args":"{\"command\":\"sleep 4\"}"}'
+"$AHUB" chat --agent guarded --tools cmd --stream --message "slow" >"$WORK/crash" 2>/dev/null &
+SLOW=$!
+until_in tool_call "$WORK/crash"
+CT="$(head -1 "$WORK/crash" | j thread)"
+chk "a second turn on a busy thread is refused" "95" "$(code chat --agent guarded --thread "$CT" --message "me too")"
+chk "as thread_busy"                  "thread_busy" "$(err_type)"
+kill -9 "$SLOW"; wait "$SLOW" 2>/dev/null
+chk "a killed turn leaves its call unanswered" "2" "$(a thread show "$CT" | j count)"
+chk "and the thread resumes at once"  "True"    "$(a chat --agent guarded --thread "$CT" --message "carry on" | j ok)"
+chk "no seq was used twice"           "True"    "$(a thread show "$CT" | python3 -c 'import json,sys
+s=[m.get("seq",0) for m in json.load(sys.stdin)["messages"]];print(len(s)==len(set(s)))')"
+
+a schedule create --name slowsched --agent guarded --prompt "slow" --every 1h --tools cmd >/dev/null
+SL="$(a schedule show slowsched | j schedule.id)"
+patch_store schedules "$SL" '{"next_run_at":"2020-01-01T00:00:00Z"}'
+"$AHUB" schedule tick >/dev/null 2>&1 &
+SLOW=$!
+for _ in $(seq 1 100); do [ -n "$(lease_of "$SL")" ] && break; sleep 0.1; done
+chk "a running schedule holds a lease" "True"   "$([ -n "$(lease_of "$SL")" ] && echo True || echo False)"
+chk "a running schedule is skipped"   "95"      "$(code schedule run slowsched)"
+sleep 1; kill -9 "$SLOW"; wait "$SLOW" 2>/dev/null
+chk "the killed run left it behind"   "True"    "$([ -n "$(lease_of "$SL")" ] && echo True || echo False)"
+patch_store schedules "$SL" '{"next_run_at":"2020-01-01T00:00:00Z"}'
+TK4="$(a schedule tick)"
+chk "a killed run does not block the next" "1"  "$(printf '%s' "$TK4" | j ran)"
+chk "and that run succeeds"           "ok"      "$(printf '%s' "$TK4" | j runs.0.status)"
+provider_ctl tool '{"tool":null}'
 
 # --- install / update ------------------------------------------------------
 # cli-update-spec: a binary already in hand relocates itself, and updates

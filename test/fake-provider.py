@@ -13,6 +13,20 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 MODE = {"fail": False, "tool": None, "args": '{"query":"ports"}', "reply": None,
         "context_limit": 0, "prompt_tokens": 0}
 
+def unpaired(msgs):
+    """As strict as a real API: each tool call is answered once, straight after it."""
+    open_calls = set()
+    for i, m in enumerate(msgs):
+        if m.get("role") == "tool":
+            if m.get("tool_call_id") not in open_calls:
+                return "message %d is a tool result with no matching call" % i
+            open_calls.discard(m.get("tool_call_id"))
+            continue
+        if open_calls:
+            return "message %d follows unanswered tool calls" % i
+        open_calls = {c.get("id") for c in m.get("tool_calls") or []}
+    return "the conversation ends with unanswered tool calls" if open_calls else None
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -52,6 +66,9 @@ class H(BaseHTTPRequestHandler):
             return self._json(500, {"error": {"message": "model on fire"}})
 
         msgs_all = req.get("messages", [])
+        broken = unpaired(msgs_all)
+        if broken:
+            return self._json(400, {"error": {"message": broken}})
         if MODE["context_limit"]:
             # A crude stand-in for a tokeniser: characters over four.
             size = sum(len(m.get("content") or "") for m in msgs_all) // 4

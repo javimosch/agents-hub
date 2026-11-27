@@ -57,10 +57,20 @@ func TestEveryWayOutOfATurnRecordsItsSpend(t *testing.T) {
 	}
 }
 
+// full records that the thread's last prompt filled the window. It is stored,
+// because a turn reads the thread again before it uses it.
+func full(t *testing.T, h *Hub, th *Thread) {
+	t.Helper()
+	th.LastPrompt = DefaultContextLimit
+	if _, err := h.C.Patch(RefThreads, th.ID, map[string]any{"last_prompt_tokens": th.LastPrompt}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompactionTokensCountAgainstTheBudget(t *testing.T) {
 	h, f := newTestHub(t)
 	th := seedThread(f, 10)
-	th.LastPrompt = DefaultContextLimit // over the threshold, so it folds first
+	full(t, h, &th) // over the threshold, so it folds first
 	p := &scripted{steps: []step{answer("summary", 100), answer("a", 7)}}
 	if _, err := h.Chat(context.Background(), p, ChatOptions{
 		Agent: Agent{Model: "m"}, Thread: &th, Message: "go",
@@ -73,7 +83,7 @@ func TestCompactionTokensCountAgainstTheBudget(t *testing.T) {
 func TestUnusableSummaryStillCostsTokens(t *testing.T) {
 	h, f := newTestHub(t)
 	th := seedThread(f, 10)
-	th.LastPrompt = DefaultContextLimit
+	full(t, h, &th)
 	p := &scripted{steps: []step{answer("", 100), answer("a", 7)}}
 	if _, err := h.Chat(context.Background(), p, ChatOptions{
 		Agent: Agent{Model: "m"}, Thread: &th, Message: "go",

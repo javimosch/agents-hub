@@ -60,6 +60,9 @@ type ChatOptions struct {
 	// OnEvent, when set, is told when the question is stored and around each
 	// tool run.
 	OnEvent func(Event)
+	// KeepAlive, when set, runs before each model call so a caller can renew
+	// what it holds. An error ends the turn.
+	KeepAlive func() error
 
 	// Memory, when set, recalls from a memgraph project and prepends the
 	// result as a second system message. It is the deliberate alternative to
@@ -155,6 +158,24 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		th = &created
 	}
 
+	// One turn per thread: two would number their messages alike and weave
+	// their tool calls together, and neither could be replayed.
+	lease, err := h.acquire(RefThreads, th.ID, Owner(), LeaseTTL)
+	if err != nil {
+		return nil, err
+	}
+	if !lease.Held {
+		return nil, &BusyError{Holder: lease.HeldBy}
+	}
+	// A failed release costs a wait for the lease to be judged abandoned.
+	defer func() { _ = h.release(lease) }()
+	// Read again now that nobody else can be changing it.
+	current, err := h.GetThread(th.ID)
+	if err != nil {
+		return nil, err
+	}
+	*th = current
+
 	// Compaction happens before the history is read, so the turn is built
 	// from the folded thread rather than the one that no longer fits.
 	var compaction *CompactReport
@@ -223,6 +244,9 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 	}
 
 	for step := 1; ; step++ {
+		if err := h.keepAlive(&lease, opts); err != nil {
+			return nil, err
+		}
 		resp, err := p.Chat(ctx, provider.Request{
 			Model:       opts.Agent.Model,
 			Messages:    msgs,
@@ -367,6 +391,17 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 			return nil, err
 		}
 	}
+}
+
+// keepAlive renews the leases a turn depends on before it spends more.
+func (h *Hub) keepAlive(thread *Lease, opts ChatOptions) error {
+	if err := h.RenewLease(thread); err != nil {
+		return err
+	}
+	if opts.KeepAlive != nil {
+		return opts.KeepAlive()
+	}
+	return nil
 }
 
 // UnfittableError is a prompt that does not fit and cannot be made to fit by

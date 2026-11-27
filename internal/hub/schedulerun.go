@@ -57,6 +57,8 @@ type RunScheduleOptions struct {
 	// SetupError is why the caller could not build this run. It is recorded
 	// like any other failure, so a schedule that cannot start still says so.
 	SetupError error
+	// KeepAlive renews the schedule's lease while the run goes on.
+	KeepAlive func() error
 }
 
 // RunSchedule executes one agent and records what happened.
@@ -114,6 +116,13 @@ func (h *Hub) RunSchedule(ctx context.Context, opts RunScheduleOptions) (*Schedu
 		Compact:     opts.Compact,
 		DailyBudget: opts.DailyBudget,
 		MaxSteps:    a.MaxSteps,
+		KeepAlive:   opts.KeepAlive,
+		// Kept from the start, so a run that fails still names its thread.
+		OnEvent: func(e Event) {
+			if e.Type == "start" {
+				run.Thread = e.Thread
+			}
+		},
 	})
 	if err != nil {
 		return h.finishScheduleRun(a, run, started, err)

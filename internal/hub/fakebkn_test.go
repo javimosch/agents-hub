@@ -25,6 +25,9 @@ type fakeBKN struct {
 	mu   sync.Mutex
 	next int
 	docs map[string][]bkn.Record // "ns/coll" -> records in creation order
+	// beforeGuarded, when set, changes a document just before a conditional
+	// patch checks it: another writer winning the race.
+	beforeGuarded func(map[string]any)
 }
 
 // newTestHub gives a test its own hub and store. Nothing is shared.
@@ -90,6 +93,20 @@ func (f *fakeBKN) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		switch r.Method {
 		case http.MethodPatch:
+			// bkn server.go storePatch: ?if=field=value guards the write, and
+			// because every hub collection is owner-scoped, a failed guard
+			// answers 404 rather than 409.
+			if f.beforeGuarded != nil && len(r.URL.Query()["if"]) > 0 {
+				f.beforeGuarded(doc)
+			}
+			for _, cond := range r.URL.Query()["if"] {
+				field, want, _ := strings.Cut(cond, "=")
+				if got, ok := doc[field]; !ok || fmt.Sprint(got) != want {
+					w.WriteHeader(http.StatusNotFound)
+					reply(map[string]any{"error": map[string]any{"type": "not_found", "message": "record not found"}})
+					return
+				}
+			}
 			for k, v := range body {
 				patchField(doc, k, v)
 			}

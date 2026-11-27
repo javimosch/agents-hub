@@ -98,6 +98,12 @@ func chatCmd(fl *flags) {
 		if bkn.FromBackend(err) {
 			fail(err, "chat")
 		}
+		var busy *hub.BusyError
+		if errors.As(err, &busy) {
+			out.Fail(out.Conflict, "thread_busy",
+				"another turn is running on this thread, held by "+busy.Holder,
+				"wait for it to finish, or leave out --thread to start a new one")
+		}
 		var overspent *hub.BudgetError
 		if errors.As(err, &overspent) {
 			// Not a provider problem and not worth retrying today. 95 says

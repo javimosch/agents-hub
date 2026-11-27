@@ -338,10 +338,15 @@ ahub job reap                     # jobs whose supervisor died stop saying "runn
 ahub config set --daily-token-budget 200000
 ```
 
-- **One run at a time per schedule.** A tick takes a lease before running, so a
-  5-minute timer and a 4-minute agent can't overlap and race on the same
-  scratchpad. The lease expires after 30 minutes, because a killed process
-  can't release its own.
+- **One run at a time per schedule, and one turn per thread.** A tick takes a
+  lease before running, so a 5-minute timer and a 4-minute agent can't overlap
+  and race on the same scratchpad. A second `chat` on a busy thread exits 95
+  (`thread_busy`). A lease left by a process that died on this machine is taken
+  over at once; one held elsewhere expires 30 minutes after its last renewal,
+  which happens before each model call.
+- **A crash does not strand a thread.** A tool call left without a result is
+  replayed with one saying the run was interrupted and the call may or may not
+  have run. The stored messages are not changed.
 - **A daily token ceiling**, checked *before* a turn — a budget enforced
   afterwards is a report. Counted atomically in bkn with `$inc`, so two
   machines spending at once can't lose an increment. Refuses with exit 95.
@@ -362,6 +367,7 @@ stdout is data, stderr is context, and the exit code says what to do next:
 | 90 | not authenticated | `ahub login` |
 | 92 | no such agent, thread or record | check the name |
 | 100 | bkn unreachable, or an update that could not be downloaded or verified | retry with backoff |
+| 95 | the state conflicts: a thread or schedule is busy, or the budget is spent | wait, then try again |
 | 105 | provider failed, or the turn was interrupted | retry the same `--thread` |
 | 110 | internal error | report it |
 
@@ -388,7 +394,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-378 assertions against a throwaway bkn, a real HTTP provider that echoes its
+388 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one

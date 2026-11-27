@@ -38,13 +38,43 @@ func buildPrompt(a Agent, th *Thread, block *memory.Block, skillText string, his
 			msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: s})
 		}
 	}
-	// A --history window can open partway through a tool exchange. A result
-	// whose call was cut off is rejected by providers, so it is cut too.
-	for len(history) > 0 && history[0].Role == provider.RoleTool {
-		history = history[1:]
-	}
-	for _, m := range history {
-		msgs = append(msgs, toProvider(m))
+	return append(msgs, replay(history)...)
+}
+
+// interrupted stands in for a result that was never stored.
+const interrupted = "No result was recorded: the run was interrupted. This call may or may not have run."
+
+// replay turns stored messages into a conversation a provider will accept:
+// every tool call answered, straight after it, exactly once. A crash, a failed
+// write or a --history window that opens mid-exchange can each leave the
+// stored messages short of that, and a provider rejects the whole thread.
+// Nothing stored is changed.
+func replay(history []Message) []provider.Message {
+	var msgs []provider.Message
+	for i := 0; i < len(history); i++ {
+		if history[i].Role == provider.RoleTool {
+			continue // no call in front of it asked for this
+		}
+		m := toProvider(history[i])
+		msgs = append(msgs, m)
+		if len(m.ToolCalls) == 0 {
+			continue
+		}
+		results := map[string]Message{}
+		for i+1 < len(history) && history[i+1].Role == provider.RoleTool {
+			i++
+			if _, seen := results[history[i].ToolCallID]; !seen {
+				results[history[i].ToolCallID] = history[i]
+			}
+		}
+		for _, call := range m.ToolCalls {
+			if r, ok := results[call.ID]; ok {
+				msgs = append(msgs, toProvider(r))
+				continue
+			}
+			msgs = append(msgs, provider.Message{Role: provider.RoleTool,
+				Content: interrupted, ToolCallID: call.ID, Name: call.Name})
+		}
 	}
 	return msgs
 }
