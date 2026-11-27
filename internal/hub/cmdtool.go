@@ -56,7 +56,7 @@ func cmdTool(policy flow.ToolPolicy, prefixes []flow.Prefix, timeout time.Durati
 				return "", err
 			}
 			out, err := flow.RunCmd(ctx,
-				flow.Limits{Commands: []string{argv[0]}, Timeout: timeout},
+				flow.Limits{Commands: []string{argv[0]}, Timeout: timeout, Env: policy.Env},
 				argv[0], argv[1:], "")
 			if err != nil {
 				return "", err

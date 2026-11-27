@@ -124,7 +124,7 @@ func configCmd(fl *flags) {
 				"provider_url": cfg.ProviderURL, "model": cfg.Model,
 				"timeout_secs": cfg.TimeoutSecs, "provider_timeout_secs": cfg.ProviderTimeoutSecs,
 				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
-				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
+				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts, "allow_env": cfg.AllowEnv,
 				"allow_tool_cmds": cfg.AllowToolCmds,
 				"allow_tool_args": cfg.AllowToolArgs,
 				"model_limits":    cfg.ModelLimits, "compact_at": cfg.CompactAt,
@@ -260,6 +260,8 @@ func applyConfigSet(fl *flags, p *Config) (changed []string, asked bool) {
 	}
 	ruled, ruleAsked := applyToolArgRules(fl, p)
 	changed, asked = append(changed, ruled...), asked || ruleAsked
+	named, envAsked := applyEnvRules(fl, p)
+	changed, asked = append(changed, named...), asked || envAsked
 	for _, c := range fl.list("deny-cmd") {
 		p.AllowCmds = without(p.AllowCmds, c)
 		changed = append(changed, "allow_cmds")

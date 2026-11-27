@@ -18,7 +18,7 @@ it is believed after being run against a real model.
 | **Fails loudly** | 🟡 | typed exit codes; `schedule tick` exits 105 if any run failed; flows never prompt; command timeouts hold for the whole process group | a flag value that is not a number is silently ignored |
 | **Resumable record** | ✅ | question stored before the model call; full history is paged; replay answers any call a crash left open; one turn per thread; compaction keeps a call with its results; a failed scheduled run names its thread | none known |
 | **Inside budget** | 🟡 | checked before a turn; spend recorded however the turn ends, including compaction and eval judges | a failure to record spend is ignored |
-| **Only what you allowed** | 🟡 | allowlists live in the profile; argv, never a shell line; a model may only add arguments the operator listed; writes need `--allow-writes` | no sandbox; child processes inherit the environment |
+| **Only what you allowed** | 🟡 | allowlists live in the profile; argv, never a shell line; a model may only add arguments the operator listed; writes need `--allow-writes`; commands get a minimal environment plus the names you allow | no sandbox: a command can read what your user can |
 
 ## Capability matrix
 
@@ -46,7 +46,7 @@ mean proven free of bugs.
 
 | Signal | 2026-11-27 |
 |---|---|
-| Live suite (`test/t-hub.sh`) | 388 passed, 0 failed |
+| Live suite (`test/t-hub.sh`) | 395 passed, 0 failed |
 | Unit coverage: `eval` / `provider` / `flow` / `hub` | 76% / 54% / 46% / 24% |
 | No unit tests | `bkn`, `out`; `update` and the CLI are tested for their spec behaviour, not every command |
 | TDD | mandatory from 2026-11-27; older code is not yet covered |

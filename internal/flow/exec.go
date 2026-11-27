@@ -114,6 +114,8 @@ func (l Limits) allowed(argv []string) error {
 // flow able to name its own executables or hosts would be arbitrary code
 // execution with extra steps.
 type Limits struct {
+	// Env names the variables a command may see beyond the basics.
+	Env      []string
 	Commands []string
 	Hosts    []string
 	Timeout  time.Duration
@@ -165,6 +167,7 @@ func RunCmdIn(ctx context.Context, lim Limits, command string, args []string, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = childEnv(lim.Env)
 	cmd.Dir = dir
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -216,6 +219,7 @@ func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = childEnv(lim.Env)
 	cmd.Stdout, cmd.Stderr = w, w
 	cmd.Stdin = nil
 	killed, err := proc.Run(cmd)

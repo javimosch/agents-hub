@@ -174,7 +174,7 @@ func jobExec(fl *flags) {
 
 	timeout := time.Duration(fl.intVal("timeout", cfg.JobTimeoutSecs)) * time.Second
 	res, runErr := flow.RunCmdTo(context.Background(),
-		flow.Limits{Commands: []string{bin}, Timeout: timeout}, bin, argv, f)
+		flow.Limits{Commands: []string{bin}, Timeout: timeout, Env: cfg.AllowEnv}, bin, argv, f)
 	if runErr != nil {
 		finishJob(h, j, 0, runErr)
 		return

@@ -556,6 +556,31 @@ tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"nomem\"
 chkin "cmd works without memgraph"    "hello nomem" "$(AHUB_MEMGRAPH=/nonexistent a chat --agent helper --tools cmd --message x | j content)"
 tool_mode '{"args":"{\"query\":\"ports\"}"}'
 
+# --- what a command can see --------------------------------------------------
+# A real environment, through each of the three ways a command is run.
+a config set --allow-tool-cmd "env" --allow-cmd env >/dev/null
+a config set --allow-tool-cmd "echo hello" >/dev/null
+curl -s -X POST "$P/control/tool" -d '{"tool":"cmd","args":"{\"command\":\"env\"}"}' >/dev/null
+ENVT="$(CANARY=leak-canary a chat --agent helper --tools cmd --message x | j thread)"
+ENVS="$(a thread show "$ENVT")"
+chkin "a model's command has a PATH"        "PATH="        "$ENVS"
+chk "nor anything else of ours"            "0" "$(printf '%s' "$ENVS" | grep -c 'leak-canary')"
+a config set --allow-env CANARY >/dev/null
+ENVT="$(CANARY=leak-canary a chat --agent helper --tools cmd --message x | j thread)"
+chkin "until the operator allows it"        "CANARY=leak-canary" "$(a thread show "$ENVT")"
+a config set --deny-env CANARY >/dev/null
+curl -s -X POST "$P/control/tool" -d '{"tool":null}' >/dev/null
+EJ="$(CANARY=leak-canary a job start --command env | j job.id)"
+a job wait "$EJ" >/dev/null
+EO="$(a job output "$EJ")"
+chkin "a job has a PATH"                    "PATH="  "$EO"
+chk "and none of our secrets"              "0" "$(printf '%s' "$EO" | grep -c 'AHUB_PROVIDER_KEY\|leak-canary')"
+printf '%s' '{"name":"envflow","start":"e","steps":{"e":{"type":"cmd","command":"env","args":[],"var":"seen","next":"m"},"m":{"type":"message","text":"{{seen}}","next":"d"},"d":{"type":"end"}}}' >"$WORK/envflow.json"
+a flow create --file "$WORK/envflow.json" >/dev/null
+EF="$(CANARY=leak-canary a flow run envflow)"
+chkin "a flow step has a PATH"              "PATH=" "$EF"
+chk "and none of our secrets"              "0" "$(printf '%s' "$EF" | grep -c 'AHUB_PROVIDER_KEY\|leak-canary')"
+
 # --- background jobs --------------------------------------------------------
 # A turn cannot wait: a test suite or a deploy outlives the provider timeout.
 # A job outlives the process that started it, which is also what lets a

@@ -198,6 +198,7 @@ func flowRun(fl *flags, resumeID string) {
 		Secrets:  cfg.Secrets,
 		MaxSteps: fl.intVal("max-steps", 0),
 		Limits: flow.Limits{
+			Env:      cfg.AllowEnv,
 			Commands: cfg.AllowCmds,
 			Hosts:    cfg.AllowHosts,
 			Timeout:  time.Duration(fl.intVal("step-timeout", 60)) * time.Second,

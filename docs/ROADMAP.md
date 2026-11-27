@@ -10,7 +10,7 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 
 | Item | Promise | Evidence |
 |---|---|---|
-| Children of `cmd` and jobs inherit the environment, tokens included. Argument rules are in place; this and a sandbox are what is left | only what you allowed | from reading |
+| A permitted command runs as your user: it can read the profile and `ahub`'s own environment. Variables are no longer passed on; a sandbox is what is left | only what you allowed | from reading |
 
 ## Next: survive concurrency and crashes
 

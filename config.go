@@ -64,6 +64,9 @@ type Config struct {
 	// AllowToolArgs lists, per prefix in AllowToolCmds, the patterns a model's
 	// further arguments must match. No entry means no arguments.
 	AllowToolArgs map[string][]string `json:"allow_tool_args,omitempty"`
+	// AllowEnv names the environment variables a permitted command may see
+	// besides the basics. Names only: the values stay in the environment.
+	AllowEnv []string `json:"allow_env,omitempty"`
 	// Secrets are referenced from a flow as {{secret.NAME}} and never stored
 	// in one, so a definition can be shared without its credentials.
 	Secrets map[string]string `json:"secrets,omitempty"`
@@ -198,7 +201,7 @@ func envInt(key string, dst *int) {
 
 // toolPolicy is what this machine lets a model run.
 func (c Config) toolPolicy() flow.ToolPolicy {
-	return flow.ToolPolicy{Commands: c.AllowToolCmds, Args: c.AllowToolArgs}
+	return flow.ToolPolicy{Commands: c.AllowToolCmds, Args: c.AllowToolArgs, Env: c.AllowEnv}
 }
 
 func (c Config) timeout() time.Duration { return time.Duration(c.TimeoutSecs) * time.Second }

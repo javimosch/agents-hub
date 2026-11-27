@@ -89,7 +89,7 @@ $ ahub chat --agent helper --message "what changed in the repo today?"
 <h2>Limits</h2>
 <p>The goal is agent runs you can leave unattended. It is not met yet.</p>
 <ul>
-<li>The <code>cmd</code> tool limits arguments to your patterns, but it is not a sandbox: commands run with your rights and inherit the environment.</li>
+<li>The <code>cmd</code> tool limits arguments to your patterns, but it is not a sandbox: commands run with your rights and can read what you can.</li>
 <li>Some concurrency and crash cases are suspected from reading the code and not yet resolved.</li>
 <li>Many parts have no unit tests yet.</li>
 <li>Commands and timeouts have been tested on Linux only.</li>

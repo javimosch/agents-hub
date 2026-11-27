@@ -17,6 +17,8 @@ type ToolPolicy struct {
 	Commands []string
 	// Args lists, per prefix, the patterns a further argument may match.
 	Args map[string][]string
+	// Env names the environment variables these commands may see.
+	Env []string
 }
 
 // Resolve returns the argv to run for a command and its extra arguments, or

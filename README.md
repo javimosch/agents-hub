@@ -162,8 +162,26 @@ pattern you listed for that prefix with `--allow-tool-arg '<prefix> <pattern>...
 
 Be careful with broad patterns. `-*` admits every flag, and `*` admits any path.
 Rules do not limit what a permitted command does by itself (`npm test` runs
-whatever the project says), and the command inherits `ahub`'s environment.
-The `job_*` tools and `ahub job start` follow the same rules.
+whatever the project says). The `job_*` tools and `ahub job start` follow the
+same rules.
+
+**What a command can see.** Model commands, jobs and flow `cmd` steps start with
+a small environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`,
+`LANGUAGE`, `LC_*`, `TZ`, `TMPDIR`, `TERM` and the `XDG_*_HOME` directories.
+Anything else needs naming, by name only:
+
+```sh
+ahub config set --allow-env GH_TOKEN      # --deny-env takes it back
+```
+
+The list applies to every permitted command on the profile. **This keeps
+variables from being handed over; it does not contain a command.** One runs as
+your user, so if its rules allow reading files it can still read the profile,
+or the environment of `ahub` itself under `/proc`.
+
+> **Upgrading:** commands used to inherit everything. One that relies on a
+> variable such as `GH_TOKEN`, `KUBECONFIG`, `SSH_AUTH_SOCK` or a proxy now
+> needs `--allow-env`.
 
 > **Upgrading:** earlier builds let any argument follow a prefix. Existing
 > prefixes now take none until you add patterns.
@@ -394,7 +412,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-388 assertions against a throwaway bkn, a real HTTP provider that echoes its
+395 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -604,8 +622,9 @@ trust.
 ## Limits
 
 - **`cmd` and job tools:** arguments are limited to your patterns, but this is
-  not a sandbox. A permitted command runs with your user's rights and inherits
-  the environment, including any tokens in it.
+  not a sandbox. A permitted command runs with your user's rights, so it can
+  reach whatever you can, `ahub`'s profile included. Its environment is limited
+  to the basics and what you allow.
 - **Updates:** unsigned, and not checked for being newer (see above).
 - **Concurrency and crashes:** some cases are suspected from reading the code
   and not yet resolved. See the [roadmap](docs/ROADMAP.md).
