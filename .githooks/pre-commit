@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# The fast gate. The live suite (test/t-hub.sh) is run separately: it needs bkn.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "pre-commit: gofmt needed:"; echo "$unformatted"; exit 1
+fi
+
+big="$(find . -name '*.go' -exec wc -l {} + | awk '$2 != "total" && $1 >= 500')"
+if [ -n "$big" ]; then
+  echo "pre-commit: files must stay under 500 lines:"; echo "$big"; exit 1
+fi
+
+go vet ./...
+go test -race -shuffle=on -timeout 120s ./...

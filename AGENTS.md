@@ -10,6 +10,12 @@ storing everything in a bkn instance. Zero third-party dependencies — standard
 library only, like bkn. Keep it that way unless there is a reason that survives
 the question "what would this cost us at deploy time?".
 
+## TDD is mandatory
+
+Every behaviour change starts with a failing test. **Read
+`.agents/skills/ahub-tdd/SKILL.md` before changing code**: red-green-refactor,
+the test doubles, and the hygiene rules.
+
 ## Layout
 
 | Path | What |
@@ -56,8 +62,10 @@ repo runs on.
 ## Before committing
 
 ```sh
-gofmt -l . && go vet ./... && go build -o bin/ahub . && bash test/t-hub.sh
+.githooks/pre-commit && go build -o bin/ahub . && bash test/t-hub.sh
 ```
+
+Once per clone: `git config core.hooksPath .githooks`.
 
 The suite needs a `bkn` binary (`BKN_BIN`, default `~/ai/bkn/bin/bkn`) and
 python3. It builds its own throwaway database and provider on random ports, so
