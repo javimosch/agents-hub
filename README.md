@@ -28,6 +28,9 @@ ahub chat --agent helper --thread 01M2... --message "and yesterday?"
 ahub thread show 01M2...
 ```
 
+Where it's headed: [vision](docs/VISION.md) ·
+[north star](docs/NORTH-STAR.md) · [roadmap](docs/ROADMAP.md).
+
 ## The model
 
 | Thing | What it is | Where it lives |
