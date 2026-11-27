@@ -36,6 +36,7 @@
     "ahub schedule tick  # Runs everything that is due. This is what a timer calls: one entry point, however many schedules, no daemon holding state between them.",
     "ahub eval validate --file quality.json  # Every regex compiles and every bound parses before a single token is spent finding out otherwise.",
     "ahub eval run quality [--strict]  # Scores an agent, case by case, on stderr as it goes. Exits 0 however it scored; --strict exits 1 when assertions failed, for a pipeline or a schedule that should go red.",
+    "ahub eval create --from-thread <id> --name <eval> --expect not_contains=probably  # Turns a bad run into a case. It must fail on that thread, or it is refused. Running it uses the thread's tools again.",
     "ahub eval compare <before> <after>  # The only question that matters after a change: what got fixed, what regressed, what still fails, and what it cost.",
     "ahub job start --command 'gh pr list' && ahub job wait <id>  # Work that outlives a turn. job list, job output and job stop are there too.",
     "ahub model list  # Context windows, shared through bkn. One machine learns a window from a refused call and the rest already know it.",

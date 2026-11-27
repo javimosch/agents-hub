@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/javimosch/agents-hub/internal/eval"
 	"github.com/javimosch/agents-hub/internal/hub"
@@ -96,6 +97,10 @@ func countCostly(s *eval.Scenario) int {
 
 func evalSave(fl *flags) {
 	h, _ := hubFor(fl)
+	if fl.has("from-thread") {
+		evalFromThread(h, fl)
+		return
+	}
 	s := readScenario(fl)
 	if problems := eval.Validate(s); eval.Fatal(problems) {
 		b, _ := json.Marshal(problems)
@@ -151,6 +156,11 @@ func evalRun(fl *flags) {
 		agentName = s.Agent
 	}
 	agent := resolveAgent(h, agentName)
+	for _, tool := range s.Tools {
+		if !slices.Contains(agent.Tools, tool) {
+			agent.Tools = append(agent.Tools, tool)
+		}
+	}
 
 	opts := hub.EvalOptions{Scenario: s, Agent: agent, DailyBudget: cfg.DailyTokenBudget}
 	if j := judgeName(fl, s); j != "" {
@@ -214,15 +224,19 @@ func attachAgentContext(fl *flags, cfg Config, a hub.Agent, opts *hub.EvalOption
 	if len(a.Tools) == 0 && len(a.Skills) == 0 && a.MemoryProject == "" {
 		return
 	}
-	mc, err := memory.New(0)
-	if err != nil {
+	var mc *memory.Client
+	if c, err := memory.New(0); err == nil {
+		mc = c
+	} else if needsMemory(a.Tools) {
 		out.Log("memory/skills/tools: %v; measuring without them", err)
 		return
+	} else if len(a.Skills) > 0 || a.MemoryProject != "" {
+		out.Log("memory/skills: %v; measuring without them", err)
 	}
-	if a.MemoryProject != "" {
+	if mc != nil && a.MemoryProject != "" {
 		opts.Memory = &hub.MemoryOptions{Client: mc, Project: a.MemoryProject, Limit: 5}
 	}
-	if len(a.Skills) > 0 {
+	if mc != nil && len(a.Skills) > 0 {
 		opts.Skills = &hub.SkillOptions{Client: mc}
 	}
 	if len(a.Tools) > 0 {

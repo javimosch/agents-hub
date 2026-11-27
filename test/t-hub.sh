@@ -57,6 +57,7 @@ export AHUB_BKN_URL="$B"
 export AHUB_PROVIDER_URL="$P"
 export AHUB_PROVIDER_KEY="not-checked"
 a() { "$AHUB" "$@" 2>"$WORK/err"; }
+provider_ctl() { curl -s -X POST "$P/control/$1" -d "$2" >/dev/null; }
 code() { "$AHUB" "$@" >"$WORK/out" 2>"$WORK/err"; echo $?; }
 # stderr may carry context lines before the error object (the spec allows it),
 # so the harness reads the last line rather than the whole file.
@@ -915,6 +916,27 @@ chk "an unreachable model fails cases" "1"      "$(a eval run guard | j failed)"
 chk "and records the error"           "True"    "$(a eval run guard | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["cases"][0]["error"]))')"
 curl -sf -X POST "$P/control/fail" -d '{"fail":false}' >/dev/null
 
+# --- a bad run becomes a test ------------------------------------------------
+a agent create --name reporter --model m1 --system sys >/dev/null
+provider_ctl reply '{"reply":"the disk is probably fine"}'
+BAD="$(a chat --agent reporter --message "is the disk ok?" | j thread)"
+chk "from-thread needs an expectation" "82" "$(code eval create --from-thread "$BAD" --name regress)"
+chk "one that passes already is refused" "82" "$(code eval create --from-thread "$BAD" --name regress --expect contains=disk)"
+chk "as expectations_pass"            "expectations_pass" "$(err_type)"
+chk "a bad operator is refused"       "85"    "$(code eval create --from-thread "$BAD" --name regress --expect nope=x)"
+chk "one that fails on it is saved"   "fails" "$(a eval create --from-thread "$BAD" --name regress --case no-guessing --expect not_contains=probably | j on_the_original)"
+chk "and the test is red"             "1"     "$(a eval run regress | j failed)"
+provider_ctl reply '{"reply":"df reports 40% used"}'
+chk "then green once the answer is right" "1" "$(a eval run regress | j passed)"
+provider_ctl reply '{"reply":null}'
+# a thread that used a tool its agent does not carry
+a config set --allow-tool-cmd "echo hello" >/dev/null
+provider_ctl tool '{"tool":"cmd","args":"{\"command\":\"echo hello\"}"}'
+TOOLT="$(a chat --agent reporter --tools cmd --message "say hello" | j thread)"
+chk "the thread's tools are saved"    "cmd"   "$(a eval create --from-thread "$TOOLT" --name withtool --expect tool_not_used=cmd | j eval.tools.0)"
+chk "and offered when it runs"        "cmd"   "$(AHUB_MEMGRAPH=/nonexistent a eval run withtool | j cases.0.tools.0)"
+provider_ctl tool '{"tool":null}'
+
 # --- schedules (autonomous runs) ----------------------------------------------
 # An schedule is a standing instruction: run this agent on this schedule with
 # nobody watching. What carries between runs is a bounded scratchpad, never
@@ -1003,7 +1025,6 @@ chk "and is not reported as held"     "0"       "$(printf '%s' "$TK3" | j skippe
 
 # --- crashes and collisions --------------------------------------------------
 # A real process, really killed, part way through a tool call.
-provider_ctl() { curl -s -X POST "$P/control/$1" -d "$2" >/dev/null; }
 until_in() { for _ in $(seq 1 100); do grep -q "$1" "$2" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
 a config set --allow-tool-cmd "sleep 4" >/dev/null
 provider_ctl tool '{"tool":"cmd","args":"{\"command\":\"sleep 4\"}"}'

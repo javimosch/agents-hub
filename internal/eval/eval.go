@@ -70,10 +70,13 @@ type Scenario struct {
 	// Judge names the agent that answers judge assertions. It defaults to the
 	// agent under test only if nothing else is set, which is worth avoiding:
 	// a model grading its own homework is a weaker signal than a second one.
-	Judge     string `json:"judge,omitempty"`
-	Cases     []Case `json:"cases"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	Judge string `json:"judge,omitempty"`
+	// Tools are offered to every case besides the agent's own. Naming one
+	// grants nothing: the machine's command rules and --allow-writes apply.
+	Tools     []string `json:"tools,omitempty"`
+	Cases     []Case   `json:"cases"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
 }
 
 // Parse reads a scenario definition.

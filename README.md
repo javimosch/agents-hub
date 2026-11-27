@@ -412,7 +412,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-395 assertions against a throwaway bkn, a real HTTP provider that echoes its
+404 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -521,6 +521,26 @@ ahub eval run quality --strict                        # exits 1 if it regressed
 ahub eval compare <before> <after>
 # {"summary":"0 fixed, 1 regressed, 0 still failing","regressed":["stays-clean"]}
 ```
+
+### Turn a bad run into a case
+
+```sh
+ahub eval create --from-thread <id> --name quality \
+  --case checks-the-disk --expect tool_used=cmd --expect 'not_contains=probably'
+ahub eval run quality --strict        # red: change the prompt, then run again
+```
+
+The case sends the thread's first question again. Free assertions are tried on
+the original thread, and if all of them pass the command refuses
+(`expectations_pass`): such a case would not have caught the problem. Use
+`--allow-passing` to pin behaviour that was right. A `judge` assertion is saved
+untried. A case added to an existing eval joins it; the same `--case` name
+replaces one.
+
+The tools the thread used are saved with the eval and offered when it runs, so a
+failed `schedule` run can be replayed. **Replaying runs those tools again**,
+under this machine's command rules and `--allow-writes`. A case does not carry a
+schedule's scratchpad, earlier turns, or what the commands returned then.
 
 | Assertion | Cost |
 |---|---|
