@@ -31,7 +31,7 @@ type Schedule struct {
 	Prompt string `json:"prompt"`
 
 	// Schedule. EverySecs and At are the whole vocabulary: anything more
-	// elaborate is a systemd timer calling `ahub agent run <name>`, which is
+	// elaborate is a systemd timer calling `ahub schedule run <name>`, which is
 	// a scheduler that already exists and that nobody has to debug here.
 	EverySecs int    `json:"every_secs,omitempty"`
 	At        string `json:"at,omitempty"` // HH:MM, daily

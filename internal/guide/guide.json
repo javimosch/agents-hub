@@ -80,12 +80,12 @@
       "why": "Fetch the published build. The version is sha256[:12] of the artifact, so there is no number to bump: identical bytes are the same version."
     },
     {
-      "command": "ahub agent create --name nightly --agent helper --prompt \"...\" --every 6h",
-      "why": "A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub agent run <name>`."
+      "command": "ahub schedule create --name nightly --agent helper --prompt \"...\" --every 6h",
+      "why": "A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub schedule run <name>`."
     },
     {
-      "command": "ahub agent tick",
-      "why": "Runs everything that is due. This is what a timer calls: one entry point, however many agents, no daemon holding state between them."
+      "command": "ahub schedule tick",
+      "why": "Runs everything that is due. This is what a timer calls: one entry point, however many schedules, no daemon holding state between them."
     },
     {
       "command": "ahub eval validate --file quality.json",
@@ -175,7 +175,7 @@
     },
     {
       "name": "the scratchpad",
-      "what": "One bounded note (4000 chars) carried between runs, written by the agent through the scratchpad tool and readable or correctable by a human with `ahub agent scratchpad <name>`. Durable knowledge goes to memgraph via memory_save instead; the scratchpad is only 'where I got to last time'."
+      "what": "One bounded note (4000 chars) carried between runs, written by the agent through the scratchpad tool and readable or correctable by a human with `ahub schedule scratchpad <name>`. Durable knowledge goes to memgraph via memory_save instead; the scratchpad is only 'where I got to last time'."
     },
     {
       "name": "agent vs flow",
@@ -243,11 +243,11 @@
     "A bkn script that runs and throws is a RESULT, not a transport failure: the step sets <var>_code=1 and takes on_error, so a flow can handle it.",
     "update verifies the download against the advertised hash AND runs it before swapping. A hash mismatch or a binary that will not run exits 110 and leaves the working binary untouched -- neither is worth retrying, because the published bytes are wrong.",
     "A machine account needs a credential that outlives its tokens: the refresh token is good for 30 days, so a timer that runs at least monthly never needs the password again, and one that lapses does.",
-    "An agent run never replays previous runs. If it needs to remember something, it must write the scratchpad or save a memory -- and it can only do that if it was given the tools.",
-    "The scratchpad tool is always offered inside an agent run and is not subject to --allow-writes: it can only overwrite that one agent's own note, which the agent is the sole author of.",
+    "A scheduled run never replays previous runs. If it needs to remember something, it must write the scratchpad or save a memory -- and it can only do that if it was given the tools.",
+    "The scratchpad tool is always offered inside a scheduled run and is not subject to --allow-writes: it can only overwrite that one schedule's own note.",
     "A failed run still advances the schedule. An agent that stopped rescheduling when it broke would go quiet exactly when you needed it to keep complaining.",
-    "`ahub agent tick` exits 105 if any agent failed, so a timer that always exits 0 does not hide a broken agent. The successful runs are recorded either way.",
-    "Re-enabling a disabled agent computes a fresh due time rather than firing once for every slot it slept through.",
+    "`ahub schedule tick` exits 105 if any schedule failed, so a timer that always exits 0 does not hide a broken agent. The successful runs are recorded either way.",
+    "Re-enabling a disabled schedule computes a fresh due time rather than firing once for every slot it slept through.",
     "An eval runs an agent with its real memory, skills and tools. Measuring it without them would measure a different agent than the one that answers real questions.",
     "Each case gets a fresh thread, so a case cannot be influenced by the one above it in the file.",
     "A case whose model call failed counts as FAILED, never skipped: an outage must never read as an improvement.",
@@ -307,7 +307,7 @@
       "why": "Run a scheduled flow by hand and read its history back out of bkn."
     },
     {
-      "command": "ahub agent run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'",
+      "command": "ahub schedule run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'",
       "why": "What one autonomous run did, and what it cost."
     },
     {

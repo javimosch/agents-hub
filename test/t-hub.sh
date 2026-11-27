@@ -69,6 +69,8 @@ echo "== agents-hub live suite (bkn :$BKN_PORT, provider :$PROV_PORT) =="
 chk "help-json lists chat"            "chat"    "$("$AHUB" help-json | python3 -c 'import json,sys;print("chat" if "chat" in json.load(sys.stdin)["commands"] else "no")')"
 chk "help-json carries exit code 105" "model provider, memgraph or a flow step failed, or the turn was interrupted" "$("$AHUB" help-json | j exit_codes.105)"
 chk "guide is machine-readable"       "ahub"    "$("$AHUB" guide | j tool)"
+chk "help-json lists spend"          "spend"   "$("$AHUB" help-json | python3 -c 'import json,sys;print("spend" if "spend" in json.load(sys.stdin)["commands"] else "no")')"
+chk "the served guide names the schedule tick" "yes" "$("$AHUB" guide | python3 -c 'import sys;g=sys.stdin.read();print("yes" if "ahub schedule tick" in g and "ahub agent tick" not in g else "no")')"
 chk "unknown command exits 80"        "80"      "$(code frobnicate)"
 chk "unknown command is typed"        "unknown_command" "$(err_type)"
 

@@ -10,8 +10,10 @@ import (
 // helpJSON is the command catalog per cli-output-spec §4. It is hand-written
 // rather than derived: a catalog generated from a parser describes the parser,
 // and the thing an agent needs described is the contract.
-func helpJSON() {
-	out.Raw(map[string]any{
+func helpJSON() { out.Raw(catalog()) }
+
+func catalog() map[string]any {
+	return map[string]any{
 		"version": Version,
 		"output":  "json",
 		"commands": map[string]any{
@@ -25,13 +27,14 @@ func helpJSON() {
 			"memory":    cmd([]string{"status|recall|save|read|projects", "[id-or-text]"}, []string{"--query <q>", "--text <t>", "--project <p>", "--type <t>", "--tags <a,b>", "--limit <n>", "--format index|full|paths", "--chars <n>"}, false),
 			"tool":      cmd([]string{"list"}, []string{}, false),
 			"model":     cmd([]string{"list|set", "[model=tokens]"}, []string{"--limit <n>"}, true),
-			"job":       cmd([]string{"list|show|output|wait|stop|start", "[job-id]"}, []string{"--command <prefix>", "--args <a> (repeatable)", "--timeout <s>", "--bytes <n>", "--status <s>"}, true),
+			"job":       cmd([]string{"list|show|output|wait|stop|start|prune|reap", "[job-id]"}, []string{"--command <prefix>", "--args <a> (repeatable)", "--timeout <s>", "--bytes <n>", "--status <s>", "--limit <n>", "--older-than-days <n>", "--dry-run", "--grace <s>"}, true),
+			"spend":     cmd([]string{}, []string{}, true),
 			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
 			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"uninstall": cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"eval":      cmd([]string{"validate|create|list|show|rm|run|runs|compare", "[name-or-run-ids]"}, []string{"--file <path>", "--agent <a>", "--judge <a>", "--strict", "--limit <n>"}, true),
 			"schedule":  cmd([]string{"create|list|show|rm|enable|disable|run|due|tick|runs|scratchpad", "[name]"}, []string{"--name <n>", "--agent <a>", "--prompt <p>", "--every <dur>", "--at <HH:MM>", "--tools <a,b>", "--skills <a,b>", "--memory-project <p>", "--max-steps <n>", "--timeout <s>", "--set <text>", "--clear", "--status <s>", "--limit <n>", "--run <id>"}, true),
-			"flow":      cmd([]string{"validate|create|list|show|rm|run|resume|runs", "[name-or-run-id]"}, []string{"--file <path>", "--input <k=v> (repeatable)", "--max-steps <n>", "--step-timeout <s>", "--status <s>", "--limit <n>", "--run <id>"}, true),
+			"flow":      cmd([]string{"validate|create|list|show|rm|run|resume|runs", "[name-or-run-id]"}, []string{"--file <path>", "--input <k=v> (repeatable)", "--max-steps <n>", "--step-timeout <s>", "--timeout <s>", "--flow <name>", "--status <s>", "--limit <n>", "--run <id>"}, true),
 			"skill":     cmd([]string{"search|recommend|show", "[name-or-text]"}, []string{"--query <q>", "--task <t>", "--limit <n>"}, false),
 			"guide":     cmd([]string{}, []string{"--human"}, false),
 			"help-json": cmd([]string{}, []string{}, false),
@@ -61,7 +64,7 @@ func helpJSON() {
 			"bkn":    "state and identity live in a bkn instance; ahub stores nothing locally but a profile",
 			"memory": "recall is delegated to the memgraph CLI; ahub implements no retrieval of its own",
 		},
-	})
+	}
 }
 
 func cmd(args, flags []string, auth bool) map[string]any {

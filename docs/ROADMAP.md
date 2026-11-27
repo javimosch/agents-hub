@@ -12,7 +12,6 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 |---|---|---|
 | `cmd` prefixes allow dangerous arguments (`git log --output=<path>`), and children inherit the environment. **Needs a decision:** argument rules per command, or a sandbox | only what you allowed | reproduced: the file write. From reading: the environment |
 | Timeouts leave grandchildren running (a 2s timeout took 15s). Likely fix: kill the process group and set `cmd.WaitDelay`. Output is also capped only after capture | fails loudly | reproduced: the timeout. From reading: the output cap |
-| The guide names `ahub agent run`, `agent tick` and `agent scratchpad`; the commands are under `schedule`. Add a test that checks guide commands against the binary | fails loudly | reproduced |
 
 ## Next: survive concurrency and crashes
 
@@ -26,6 +25,8 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | Report a failure to record spend | from reading |
 | `cmd` silently drops extra words in `command` | from reading |
 | memgraph output over 2 MiB may block until the timeout | from reading |
+| `help-json` leaves out some flags the code reads (such as `schedule runs --schedule` and `--lease-ttl`). The README's `schedule runs --agent` is silently ignored: the filter is `--schedule` | from reading |
+| Schedule errors still say "agent", and suggest `ahub agent create` with schedule flags | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |
 
 ## Then: make the tests carry the promises
