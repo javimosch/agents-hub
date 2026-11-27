@@ -21,7 +21,7 @@ func threadCmd(fl *flags) {
 }
 
 func threadList(h *hub.Hub, fl *flags) {
-	list, err := h.ListThreads(fl.str("assistant"), fl.intVal("limit", 50))
+	list, err := h.ListThreads(fl.str("agent"), fl.intVal("limit", 50))
 	if err != nil {
 		fail(err, "list threads")
 	}

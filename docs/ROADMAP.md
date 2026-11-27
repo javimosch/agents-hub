@@ -25,8 +25,7 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | Report a failure to record spend | from reading |
 | `cmd` silently drops extra words in `command` | from reading |
 | memgraph output over 2 MiB may block until the timeout | from reading |
-| `help-json` leaves out some flags the code reads (such as `schedule runs --schedule` and `--lease-ttl`). The README's `schedule runs --agent` is silently ignored: the filter is `--schedule` | from reading |
-| Schedule errors still say "agent", and suggest `ahub agent create` with schedule flags | from reading |
+| `schedule show`, `run` and others still take the schedule's name through `--agent`, a leftover that reads as an agent filter | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |
 
 ## Then: make the tests carry the promises

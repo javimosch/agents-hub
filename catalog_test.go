@@ -92,19 +92,6 @@ func TestHelpJSONListsExactlyTheCommandsThatDispatch(t *testing.T) {
 }
 
 func TestHelpJSONListsExactlyTheSubcommandsThatDispatch(t *testing.T) {
-	dispatchers := map[string][2]string{
-		"agent":    {"cmd_agent.go", "agentCmd"},
-		"config":   {"cmd_auth.go", "configCmd"},
-		"eval":     {"cmd_eval.go", "evalCmd"},
-		"flow":     {"cmd_flow.go", "flowCmd"},
-		"job":      {"cmd_job.go", "jobCmd"},
-		"memory":   {"cmd_memory.go", "memoryCmd"},
-		"model":    {"cmd_model.go", "modelCmd"},
-		"schedule": {"cmd_schedule.go", "scheduleCmd"},
-		"skill":    {"cmd_skill.go", "skillCmd"},
-		"thread":   {"cmd_thread.go", "threadCmd"},
-		"tool":     {"cmd_tool.go", "toolCmd"},
-	}
 	commands := catalog()["commands"].(map[string]any)
 	for name, at := range dispatchers {
 		t.Run(name, func(t *testing.T) {
@@ -114,6 +101,29 @@ func TestHelpJSONListsExactlyTheSubcommandsThatDispatch(t *testing.T) {
 			}
 			listed := strings.Split(entry["args"].([]string)[0], "|")
 			compareWithDispatch(t, name, listed, switchCases(t, at[0], at[1]))
+		})
+	}
+}
+
+func TestHelpJSONListsExactlyTheFlagsEachCommandReads(t *testing.T) {
+	reader := newFlagReader(t)
+	for name, entry := range catalog()["commands"].(map[string]any) {
+		t.Run(name, func(t *testing.T) {
+			listed := []string{}
+			for _, f := range entry.(map[string]any)["flags"].([]string) {
+				listed = append(listed, strings.Fields(f)[0])
+			}
+			read := reader.reads(name, "")
+			for flag := range read {
+				if !slices.Contains(listed, flag) && !slices.Contains(globalFlags, flag) {
+					t.Errorf("%s reads %s, help-json does not list it", name, flag)
+				}
+			}
+			for _, flag := range listed {
+				if !read[flag] && !slices.Contains(globalFlags, flag) {
+					t.Errorf("help-json lists %s %s, the command never reads it", name, flag)
+				}
+			}
 		})
 	}
 }

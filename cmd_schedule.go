@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/javimosch/agents-hub/internal/bkn"
 	"github.com/javimosch/agents-hub/internal/hub"
 	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/out"
@@ -38,7 +39,7 @@ func scheduleCmd(fl *flags) {
 		scheduleScratchpad(fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
-			"agent takes create, list, show, rm, enable, disable, run, due, tick, runs, scratchpad")
+			"schedule takes create, list, show, rm, enable, disable, run, due, tick, runs, scratchpad")
 	}
 }
 
@@ -68,7 +69,7 @@ func scheduleCreate(fl *flags) {
 	if err != nil {
 		if !isBackend(err) {
 			out.Fail(out.ValidationError, "validation_error", err.Error(),
-				`ahub agent create --name nightly --agent helper --prompt "..." --every 24h`)
+				`ahub schedule create --name nightly --agent helper --prompt "..." --every 24h`)
 		}
 		fail(err, "create schedule")
 	}
@@ -238,7 +239,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 		if err != nil {
 			if len(a.Tools) > 0 {
 				out.Fail(out.NotFound, "memgraph_missing", err.Error(),
-					"this agent declares tools, and every tool is memgraph-backed")
+					"this schedule declares tools, and every tool is memgraph-backed")
 			}
 			out.Log("memory/skills: %v; running without them", err)
 		} else {
@@ -314,12 +315,12 @@ func scheduleRef(fl *flags) string {
 
 func resolveSchedule(h *hub.Hub, ref string) hub.Schedule {
 	if ref == "" {
-		out.Fail(out.ValidationError, "validation_error", "name an agent", "ahub agent list")
+		out.Fail(out.ValidationError, "validation_error", "name a schedule", "ahub schedule list")
 	}
 	a, err := h.FindSchedule(ref)
 	if err != nil {
-		if !isBackend(err) {
-			out.Fail(out.NotFound, "not_found", err.Error(), "ahub agent list")
+		if !isBackend(err) || bkn.NotFound(err) {
+			out.Fail(out.NotFound, "not_found", err.Error(), "ahub schedule list")
 		}
 		fail(err, "resolve schedule")
 	}
@@ -328,7 +329,7 @@ func resolveSchedule(h *hub.Hub, ref string) hub.Schedule {
 
 func pluralSchedules(n int) string {
 	if n == 1 {
-		return "1 agent"
+		return "1 schedule"
 	}
-	return fmt.Sprintf("%d agents", n)
+	return fmt.Sprintf("%d schedules", n)
 }

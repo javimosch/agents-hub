@@ -458,7 +458,7 @@ ahub schedule create --name nightly --agent helper --every 6h \
   --tools memory_recall --memory-project machin
 
 ahub schedule tick     # runs everything due; this is what a timer calls
-ahub schedule runs --agent nightly
+ahub schedule runs --schedule nightly
 ```
 
 **Each run starts a fresh thread.** What carries forward is one bounded note —

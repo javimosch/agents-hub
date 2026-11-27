@@ -191,7 +191,7 @@ func (h *Hub) CreateSchedule(a Schedule) (Schedule, error) {
 // FindSchedule resolves by id then by name.
 func (h *Hub) FindSchedule(ref string) (Schedule, error) {
 	if ref == "" {
-		return Schedule{}, fmt.Errorf("name an agent")
+		return Schedule{}, fmt.Errorf("name a schedule")
 	}
 	if rec, err := h.C.Get(RefSchedules, ref); err == nil {
 		return scheduleFrom(rec), nil
@@ -205,7 +205,7 @@ func (h *Hub) FindSchedule(ref string) (Schedule, error) {
 		return Schedule{}, err
 	}
 	if len(recs) == 0 {
-		return Schedule{}, &bkn.APIError{Status: 404, Type: "not_found", Message: "no agent named " + ref}
+		return Schedule{}, &bkn.APIError{Status: 404, Type: "not_found", Message: "no schedule named " + ref}
 	}
 	return scheduleFrom(recs[0]), nil
 }

@@ -120,6 +120,8 @@ chk "messages are in order"           "user"    "$(a thread show "$TID" | j mess
 chk "seq increments"                  "3"       "$(a thread show "$TID" | j messages.3.seq)"
 chk "thread counts its messages"      "4"       "$(a thread show "$TID" | j thread.messages)"
 chk "thread is titled from turn one"  "first question" "$(a thread show "$TID" | j thread.title)"
+chk "threads filter by agent"        "0"       "$(a thread list --agent nobody-by-this-name | j count)"
+chk "and the filter keeps its own"    "helper"  "$(a thread list --agent helper | j threads.0.agent)"
 chk "threads are listed"              "helper"  "$(a thread list | j threads.0.agent)"
 chk "unknown thread exits 92"         "92"      "$(code chat --agent helper --thread nope --message hi)"
 
