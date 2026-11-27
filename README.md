@@ -365,8 +365,20 @@ stdout is data, stderr is context, and the exit code says what to do next:
 | 105 | provider failed, or the turn was interrupted | retry the same `--thread` |
 | 110 | internal error | report it |
 
-`--stream` emits NDJSON delta objects (`{"type":"delta","text":"..."}`) followed
-by the usual envelope, so a stream stays parseable line by line.
+`chat --stream` writes JSON Lines to stdout, one object per line:
+
+| `type` | When | Fields |
+|---|---|---|
+| `start` | the question is stored, before the model is called | `thread` |
+| `delta` | a piece of answer text arrives | `text` |
+| `tool_call` | a tool is about to run | `step`, `call_id`, `name`, `args` |
+| `tool_result` | it finished | `step`, `call_id`, `name`, `chars`, `failed` |
+| `result` | last line of a successful turn | the usual envelope |
+
+Empty fields are left out, and a reader should skip a `type` it does not know. A
+failed turn has no `result` line: the error is on stderr with its exit code, and
+`start` has already named the thread to resume. A tool's output is not
+streamed; `ahub thread show` has it.
 
 `ahub guide` is the mental model; `ahub help-json` is the command catalog.
 

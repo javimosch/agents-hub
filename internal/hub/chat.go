@@ -57,6 +57,9 @@ type ChatOptions struct {
 	// hide the loss instead of bounding it.
 	HistoryLimit int
 	OnDelta      func(string)
+	// OnEvent, when set, is told when the question is stored and around each
+	// tool run.
+	OnEvent func(Event)
 
 	// Memory, when set, recalls from a memgraph project and prepends the
 	// result as a second system message. It is the deliberate alternative to
@@ -200,6 +203,10 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, err
 	}
 
+	// Sent as soon as there is something to resume: a turn that dies later
+	// has already named its thread.
+	opts.emit(Event{Type: "start", Thread: th.ID})
+
 	// From here on the context knows which thread it belongs to, so a tool
 	// that records something can say what asked for it.
 	ctx = WithThread(ctx, th.ID)
@@ -338,7 +345,11 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		}
 
 		for _, call := range resp.ToolCalls {
+			opts.emit(Event{Type: "tool_call", Step: step, ID: call.ID,
+				Name: call.Name, Args: call.Arguments})
 			result, run := h.runTool(ctx, opts.Tools, step, call)
+			opts.emit(Event{Type: "tool_result", Step: step, ID: call.ID,
+				Name: call.Name, Chars: run.Chars, Failed: run.Failed})
 			turn.ToolRuns = append(turn.ToolRuns, run)
 			if _, err := h.AppendMessage(Message{
 				ThreadID: th.ID, Role: provider.RoleTool, Content: result,

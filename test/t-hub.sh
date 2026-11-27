@@ -127,7 +127,10 @@ chk "unknown thread exits 92"         "92"      "$(code chat --agent helper --th
 
 # --- streaming -------------------------------------------------------------
 S="$(a chat --agent helper --message "stream me" --stream)"
-chk "stream emits NDJSON deltas"      "delta"   "$(printf '%s' "$S" | head -1 | j type)"
+chk "stream opens with start"         "start"   "$(printf '%s' "$S" | head -1 | j type)"
+chk "start names the thread"          "$(printf '%s' "$S" | tail -1 | j thread)" "$(printf '%s' "$S" | head -1 | j thread)"
+chk "stream emits NDJSON deltas"      "delta"   "$(printf '%s' "$S" | sed -n 2p | j type)"
+chk "the last line is typed result"   "result"  "$(printf '%s' "$S" | tail -1 | j type)"
 chk "every stream line is JSON"       "ok"      "$(printf '%s' "$S" | python3 -c 'import json,sys
 [json.loads(l) for l in sys.stdin if l.strip()]
 print("ok")')"
@@ -293,6 +296,8 @@ tool_mode '{"args":"{\"query\":\"ports\"}"}'   # back to the default for later s
 ST="$(a chat --agent helper --tools memory_recall --stream --message "stream a tool")"
 chk "a streamed tool call works"      "True"    "$(printf '%s' "$ST" | tail -1 | j ok)"
 chk "the streamed loop ran twice"     "2"       "$(printf '%s' "$ST" | tail -1 | j steps)"
+chkin "the stream shows tool activity" "start tool_call tool_result" "$(printf '%s\n' "$ST" | python3 -c 'import json,sys
+print(" ".join(t for t in (json.loads(l)["type"] for l in sys.stdin) if t!="delta"))')"
 
 # An agent can carry its tools.
 a agent create --name tooled --model m1 --system sys --tools memory_recall,skill_show >/dev/null

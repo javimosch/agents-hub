@@ -90,6 +90,7 @@ func chatCmd(fl *flags) {
 		opts.OnDelta = func(s string) {
 			_ = enc.Encode(map[string]any{"type": "delta", "text": s})
 		}
+		opts.OnEvent = func(e hub.Event) { _ = enc.Encode(e) }
 	}
 
 	turn, err := h.Chat(ctx, p, opts)
@@ -173,6 +174,9 @@ func chatCmd(fl *flags) {
 	fields["steps"] = turn.Steps
 	if len(turn.ToolRuns) > 0 {
 		fields["tool_runs"] = turn.ToolRuns
+	}
+	if fl.stream {
+		fields["type"] = "result"
 	}
 	out.Data(fields)
 	if fl.human {

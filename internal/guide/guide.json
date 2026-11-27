@@ -187,7 +187,7 @@
   },
   "gotchas": [
     "The user message is stored before the model is called. A provider timeout costs you the answer, not the question: retry with the same --thread.",
-    "--stream emits NDJSON delta objects on stdout, then the final envelope. It is not bare text; parse per line.",
+    "--stream writes JSON Lines: start (thread id), delta, tool_call, tool_result, then the envelope with type result. A failed turn has no result line; resume the thread start named.",
     "An agent name that matches two agents is an error, not a coin flip. Use the id, or rename one.",
     "Exit 105 means the model provider failed and a retry may work. Exit 90 means your token is wrong or expired and retrying will not help.",
     "`ahub setup` needs the bkn ADMIN token; nothing else does. If a command asks you for the admin token, that is a bug.",
