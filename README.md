@@ -1,5 +1,7 @@
 # agents-hub
 
+<p align="center"><img src="docs/icon.svg" width="112" alt="ahub logo"></p>
+
 `ahub` — run a configured agent from the command line, non-interactively,
 with the conversation stored durably in [bkn](https://github.com/javimosch/bkn).
 
@@ -344,7 +346,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-348 assertions against a throwaway bkn, a real HTTP provider that echoes its
+360 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
