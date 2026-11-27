@@ -18,7 +18,7 @@ it is believed after being run against a real model.
 | **Fails loudly** | 🟡 | typed exit codes; `schedule tick` exits 105 if any run failed; flows never prompt; command timeouts hold for the whole process group | the `update` smoke test has no timeout |
 | **Resumable record** | 🟡 | question stored before the model call; full history is paged; a step-limited turn can be resumed | a crash or store failure mid tool loop can leave unanswered calls; threads damaged before the fix are not repaired |
 | **Inside budget** | 🟡 | checked before a turn; spend recorded however the turn ends, including compaction and eval judges | a failure to record spend is ignored |
-| **Only what you allowed** | 🟡 | allowlists live in the profile; argv, never a shell line; writes need `--allow-writes` | an allowed prefix such as `git log` also permits `--output=<path>`, which writes files; child processes inherit the environment |
+| **Only what you allowed** | 🟡 | allowlists live in the profile; argv, never a shell line; a model may only add arguments the operator listed; writes need `--allow-writes` | no sandbox; child processes inherit the environment |
 
 ## Capability matrix
 
@@ -28,7 +28,7 @@ it is believed after being run against a real model.
 | OpenAI-compatible providers, streaming | ✅ | one interface, one implementation |
 | Memory and skills (memgraph) | ✅ | budgeted; degrade unless marked required |
 | Tool loop | 🟡 | bounded by `--max-steps`; see "Resumable record" |
-| `cmd` tool | 🟡 | prefix allowlist; see "Only what you allowed" |
+| `cmd` tool | 🟡 | prefix and argument allowlists; see "Only what you allowed" |
 | Background jobs | 🟡 | survive the turn; see the ownership item in the roadmap |
 | Flows | ✅ | validate, run, pause, resume; only `ask` calls a model |
 | Schedules | 🟡 | scratchpad and lease; the lease has suspected races |
@@ -45,7 +45,7 @@ mean proven free of bugs.
 
 | Signal | 2026-11-27 |
 |---|---|
-| Live suite (`test/t-hub.sh`) | 360 passed, 0 failed |
+| Live suite (`test/t-hub.sh`) | 366 passed, 0 failed |
 | Unit coverage: `eval` / `provider` / `flow` / `hub` | 76% / 54% / 46% / 24% |
 | No unit tests | `bkn`, `memory`, `update`, `out`; the CLI is tested only for its command catalog, documented commands, schedule errors and the thread filter |
 | TDD | mandatory from 2026-11-27; older code is not yet covered |
@@ -59,4 +59,4 @@ a test that has been seen to fail.
 |---|---|
 | 2026-09-09 | Chat over bkn, memory and skills, tool loop, flows, schedules, evals, jobs, compaction, self-update |
 | 2026-09-10 | Fixes for unattended runs; flow working directory and run read-back |
-| 2026-11-27 | Review found and fixed three bugs: history cut at 50 rows, `max_steps` leaving threads unresumable, failed turns not counted. TDD became mandatory. Fixed guide and `help-json` drift, and a `thread list --agent` filter that was silently ignored, now held by tests. Fixed timeouts that children could outlast, including a memgraph call that could hang for good |
+| 2026-11-27 | Review found and fixed three bugs: history cut at 50 rows, `max_steps` leaving threads unresumable, failed turns not counted. TDD became mandatory. Fixed guide and `help-json` drift, and a `thread list --agent` filter that was silently ignored, now held by tests. Added argument rules for `cmd` and jobs. Fixed timeouts that children could outlast, including a memgraph call that could hang for good |

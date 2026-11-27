@@ -207,30 +207,21 @@ func (h *Hub) Spawn(j Job) (Job, error) {
 	return j, h.UpdateJob(j.ID, map[string]any{"pid": j.PID})
 }
 
-// ResolveJobCommand checks a recorded job against the current allowlist and
+// ResolveJobCommand checks a recorded job against the current policy and
 // returns the binary and the arguments to run.
-func ResolveJobCommand(prefixes []flow.Prefix, j Job) (argv []string, bin string, err error) {
-	p, ok := flow.Match(prefixes, strings.Fields(j.Command))
-	if !ok {
-		return nil, "", fmt.Errorf("%q is not permitted on this machine", j.Command)
+func ResolveJobCommand(policy flow.ToolPolicy, j Job) (argv []string, bin string, err error) {
+	full, err := policy.Resolve(j.Command, j.Args)
+	if err != nil {
+		return nil, "", err
 	}
-	return append(append([]string{}, p.Fields[1:]...), j.Args...), p.Fields[0], nil
+	return full[1:], full[0], nil
 }
 
 // StartJob validates, records and spawns in one step, so no caller can do two
 // of the three and leave a half-started job behind.
-func StartJob(h *Hub, allowed []string, j Job, extra []string) (Job, error) {
-	prefixes, err := flow.ParsePrefixes(allowed)
-	if err != nil {
+func StartJob(h *Hub, policy flow.ToolPolicy, j Job, extra []string) (Job, error) {
+	if _, err := policy.Resolve(j.Command, extra); err != nil {
 		return Job{}, err
-	}
-	if _, ok := flow.Match(prefixes, strings.Fields(j.Command)); !ok {
-		if len(prefixes) == 0 {
-			return Job{}, fmt.Errorf("no commands are permitted on this machine; " +
-				"add one with `ahub config set --allow-tool-cmd '<prefix>'`")
-		}
-		return Job{}, fmt.Errorf("%q is not permitted here. Permitted commands: %s",
-			j.Command, flow.Names(prefixes))
 	}
 	j.Args = extra
 	created, err := h.CreateJob(j)

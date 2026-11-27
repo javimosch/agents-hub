@@ -63,7 +63,7 @@ footer{border-top:1px solid var(--line);padding:28px 0 56px;color:var(--mut);fon
 <img src="icon.svg" alt="ahub logo: three connected points between curly braces" width="176" height="176">
 </header>
 
-<div class="warn"><strong>Early project, with known safety gaps.</strong> Do not give an agent the <code>cmd</code> tool on a machine or data you care about: permitting a command prefix does not limit everything its arguments can do. <a href="#limits">Limits</a>.</div>
+<div class="warn"><strong>Early project, with known safety gaps.</strong> Do not give an agent the <code>cmd</code> tool on a machine or data you care about: it limits arguments to what you list, but it is not a sandbox. <a href="#limits">Limits</a>.</div>
 
 <pre><span class="c"># save the configuration once</span>
 $ ahub agent create --name helper --model mistral-small-latest \
@@ -89,7 +89,7 @@ $ ahub chat --agent helper --message "what changed in the repo today?"
 <h2>Limits</h2>
 <p>The goal is agent runs you can leave unattended. It is not met yet.</p>
 <ul>
-<li>A permitted <code>cmd</code> prefix can still allow arguments with unwanted effects, and child processes inherit the environment.</li>
+<li>The <code>cmd</code> tool limits arguments to your patterns, but it is not a sandbox: commands run with your rights and inherit the environment.</li>
 <li>Some concurrency and crash cases are suspected from reading the code and not yet resolved.</li>
 <li>Many parts have no unit tests yet.</li>
 <li>Commands and timeouts have been tested on Linux only.</li>
@@ -106,6 +106,6 @@ $ ahub config set --provider-url https://api.mistral.ai/v1 --provider-key "$MIST
 <p><code>ahub guide</code> explains the model; <code>ahub help-json</code> lists the commands.</p>
 </section>
 </main>
-<footer><div class="wrap">A Go CLI that uses only the standard library. <a href="https://github.com/javimosch/agents-hub">javimosch/agents-hub</a></div></footer>
+<footer><div class="wrap">A Go CLI that uses only the standard library. MIT licensed. <a href="https://github.com/javimosch/agents-hub">javimosch/agents-hub</a></div></footer>
 </body>
 </html>

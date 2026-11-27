@@ -213,7 +213,7 @@ func toolsFor(fl *flags, cfg Config, h *hub.Hub, a hub.Agent) *hub.Registry {
 	reg, err := hub.NewRegistry(hub.RegistryOptions{
 		Names: names, Memory: c, Project: project,
 		AllowWrites: fl.has("allow-writes"),
-		ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+		Policy:      cfg.toolPolicy(), Timeout: cfg.timeout(),
 		Hub: h,
 	})
 	if err != nil {

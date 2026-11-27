@@ -92,8 +92,8 @@ func needsMemgraph(names []string) bool {
 // is enabled. It exists so an agent can discover the set without guessing.
 func ToolCatalog() []map[string]any {
 	all := builtins(nil, "")
-	all["cmd"] = cmdTool(nil, 0)
-	for n, t := range jobTools(nil, nil) {
+	all["cmd"] = cmdTool(flow.ToolPolicy{}, nil, 0)
+	for n, t := range jobTools(nil, flow.ToolPolicy{}, nil) {
 		all[n] = t
 	}
 	names := make([]string, 0, len(all))
@@ -120,11 +120,10 @@ type RegistryOptions struct {
 	Project string
 	// AllowWrites permits a tool that mutates a shared store.
 	AllowWrites bool
-	// ToolCmds are the command prefixes the cmd tool may run. Empty means the
-	// cmd tool does not exist, which is the default: an agent reaches the
-	// world only where an operator wrote down exactly how.
-	ToolCmds []string
-	Timeout  time.Duration
+	// Policy is what the cmd and job tools may run. No commands means those
+	// tools do not exist.
+	Policy  flow.ToolPolicy
+	Timeout time.Duration
 	// Hub and Thread are needed by the job tools, which record what they
 	// start. A registry built without a Hub simply has no job tools.
 	Hub *Hub
@@ -164,14 +163,14 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 		return nil, fmt.Errorf("tools need memgraph: %w", memory.ErrUnavailable)
 	}
 	all := builtins(mc, defaultProject)
-	prefixes, err := flow.ParsePrefixes(opts.ToolCmds)
+	prefixes, err := flow.ParsePrefixes(opts.Policy.Commands)
 	if err != nil {
 		return nil, err
 	}
 	if len(prefixes) > 0 {
-		all["cmd"] = cmdTool(prefixes, opts.Timeout)
+		all["cmd"] = cmdTool(opts.Policy, prefixes, opts.Timeout)
 		if opts.Hub != nil {
-			for n, t := range jobTools(opts.Hub, prefixes) {
+			for n, t := range jobTools(opts.Hub, opts.Policy, prefixes) {
 				all[n] = t
 			}
 		}

@@ -13,7 +13,7 @@ everything this binary prints follows
 [cli-output-spec](https://cli-specs.intrane.fr/).
 
 > **Early project, with known safety gaps.** Read [Limits](#limits) before
-> giving an agent the `cmd` or job tools.
+> giving an agent the `cmd` or job tools. They are not a sandbox.
 
 ```sh
 go build -o bin/ahub . && ./bin/ahub install     # build from source
@@ -137,18 +137,36 @@ too — **prefixes**, not bare command names:
 
 ```sh
 ahub config set --allow-tool-cmd 'gh pr list' --allow-tool-cmd 'git log'
+ahub config set --allow-tool-arg 'git log --oneline -n * --since=*'
 ahub chat --agent helper --tools cmd --message "what PRs are open?"
 ```
 
-The model picks a permitted prefix and may append arguments; it can never
-change the prefix. Allowing `git log` does not allow `git push --force`, and
-`git logger` is not a match either — comparison is on whole fields. The list is
-empty by default, so the tool does not exist until someone permits something.
+The model picks a permitted prefix and can never change it. `git logger` is not
+a match for `git log`: comparison is on whole fields. The list is empty by
+default, so the tool does not exist until someone permits something.
 
-**A prefix does not make a command safe.** It limits how a command starts, not
-what its arguments can do: with `git log` allowed, `git log --output=<path>`
-writes a file. The command also inherits `ahub`'s environment. The job tools
-use the same list and have the same gap.
+**A prefix alone takes no arguments.** A prefix only says how a command starts:
+`git log --output=<path>` writes a file. So every further argument must match a
+pattern you listed for that prefix with `--allow-tool-arg '<prefix> <pattern>...'`:
+
+- A pattern matches one whole argument. `*` stands for any text, spaces
+  included: `--since=*` matches `--since=1 week ago`.
+- `*` never lets a flag through. An argument starting with `-` only matches a
+  pattern that itself starts with `-`.
+- Patterns are not tied to a position or to each other. For `-n 5`, list both
+  `-n` and `*`, and that `*` then admits any other value too.
+- With both `git` and `git log` permitted, the rules of the one the model names
+  as the command apply. Rules for `git` with `*` would admit `git` + `push`.
+- `--deny-tool-arg` removes patterns. `--deny-tool-cmd` removes a prefix and
+  its patterns.
+
+Be careful with broad patterns. `-*` admits every flag, and `*` admits any path.
+Rules do not limit what a permitted command does by itself (`npm test` runs
+whatever the project says), and the command inherits `ahub`'s environment.
+The `job_*` tools and `ahub job start` follow the same rules.
+
+> **Upgrading:** earlier builds let any argument follow a prefix. Existing
+> prefixes now take none until you add patterns.
 
 It is deliberately **not** behind `--allow-writes`: the prefix list is a
 stronger and more specific gate, and a flag you must pass even to run `git log`
@@ -357,7 +375,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-360 assertions against a throwaway bkn, a real HTTP provider that echoes its
+366 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -534,8 +552,9 @@ its hash come from the same server. Only update from a server you trust.
 
 ## Limits
 
-- **`cmd` and job tools:** an allowed prefix does not restrict arguments, and
-  child processes inherit the environment.
+- **`cmd` and job tools:** arguments are limited to your patterns, but this is
+  not a sandbox. A permitted command runs with your user's rights and inherits
+  the environment, including any tokens in it.
 - **Updates:** unsigned, and not checked for being newer (see above).
 - **Concurrency and crashes:** some cases are suspected from reading the code
   and not yet resolved. See the [roadmap](docs/ROADMAP.md).
@@ -562,3 +581,7 @@ webhook is wiring, not engine work.
 RAG is not on the list: memory and skills replace it deliberately. A note
 somebody wrote on purpose, retrievable by name and readable as text, beats a
 chunk retrieved by cosine similarity from a corpus nobody can audit.
+
+## License
+
+[MIT](LICENSE)

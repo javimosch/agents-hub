@@ -255,7 +255,7 @@ func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger 
 				reg, err := hub.NewRegistry(hub.RegistryOptions{
 					Names: a.Tools, Memory: mc, Project: a.MemoryProject,
 					AllowWrites: fl.has("allow-writes"),
-					ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+					Policy:      cfg.toolPolicy(), Timeout: cfg.timeout(),
 					Hub: h,
 				})
 				if err != nil {

@@ -33,7 +33,7 @@ It is the agentic spine alone: no UI, no widget, no vector store.
 | RAG or an embedding pipeline | memgraph memories and skills replace it |
 | An MCP gateway | a CLI is the better integration surface |
 | Sub-agents, `loop` or `subflow` steps | the caller already loops, branches and composes |
-| A shell tool | commands are reached through operator-written prefixes |
+| A shell tool | commands are reached through operator-written prefixes and argument rules |
 | A long-running daemon | a timer calling `ahub schedule tick` is enough |
 
 These are current decisions, not permanent ones. Reversing one takes a real use

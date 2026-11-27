@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/javimosch/agents-hub/internal/flow"
 )
 
 // Config is everything ahub needs to reach its two dependencies: a bkn
@@ -56,9 +58,12 @@ type Config struct {
 	// AllowToolCmds is a SEPARATE list, and separate on purpose. A flow step
 	// runs argv a human wrote; the cmd tool runs argv a model wrote. So this
 	// list holds command PREFIXES ("gh pr list") rather than bare names: the
-	// model may append arguments, never change the prefix. Allowlisting bare
-	// "git" for a model would permit `git push --force`.
+	// model may never change the prefix, and may only append what
+	// AllowToolArgs lists.
 	AllowToolCmds []string `json:"allow_tool_cmds,omitempty"`
+	// AllowToolArgs lists, per prefix in AllowToolCmds, the patterns a model's
+	// further arguments must match. No entry means no arguments.
+	AllowToolArgs map[string][]string `json:"allow_tool_args,omitempty"`
 	// Secrets are referenced from a flow as {{secret.NAME}} and never stored
 	// in one, so a definition can be shared without its credentials.
 	Secrets map[string]string `json:"secrets,omitempty"`
@@ -189,6 +194,11 @@ func envInt(key string, dst *int) {
 			*dst = n
 		}
 	}
+}
+
+// toolPolicy is what this machine lets a model run.
+func (c Config) toolPolicy() flow.ToolPolicy {
+	return flow.ToolPolicy{Commands: c.AllowToolCmds, Args: c.AllowToolArgs}
 }
 
 func (c Config) timeout() time.Duration { return time.Duration(c.TimeoutSecs) * time.Second }

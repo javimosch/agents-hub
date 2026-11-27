@@ -25,7 +25,7 @@ const maxCmdOutput = 4000
 // until an operator writes down exactly which command shapes are permitted --
 // and a flag that must be passed even to run `git log` would only teach
 // people that the flag means nothing.
-func cmdTool(prefixes []flow.Prefix, timeout time.Duration) Tool {
+func cmdTool(policy flow.ToolPolicy, prefixes []flow.Prefix, timeout time.Duration) Tool {
 	allowed := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
 		allowed = append(allowed, p.Raw)
@@ -35,30 +35,29 @@ func cmdTool(prefixes []flow.Prefix, timeout time.Duration) Tool {
 		Spec: provider.Tool{
 			Name: "cmd",
 			Description: "Run one of the commands this machine permits, and read its output. " +
-				"You may append arguments to a permitted command but never change it. " +
-				"Permitted commands: " + list + ". " +
+				"You may never change a command, and may append only the arguments listed with it " +
+				"(* stands for any text). Permitted commands: " + policy.Describe() + ". " +
 				"The result carries the exit code: 0 succeeded, and every tool here follows the " +
 				"same convention -- 105 means retry, 82 means your arguments were wrong, " +
 				"92 means the thing was not found.",
 			Parameters: object(map[string]any{
 				"command": prop("string", "Exactly one of the permitted commands, copied verbatim: "+list),
-				"args":    arrayProp("string", "Extra arguments to append. Each element is one argument; they are never re-parsed by a shell."),
+				"args":    arrayProp("string", "Extra arguments to append, only as listed for the command. Each element is one argument; they are never re-parsed by a shell."),
 			}, "command"),
 		},
 		Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 			want := str(args, "command")
-			p, ok := flow.Match(prefixes, strings.Fields(want))
-			if !ok {
-				return "", fmt.Errorf("%q is not permitted here. Permitted commands: %s", want, list)
-			}
 			extra, err := strList(args, "args")
 			if err != nil {
 				return "", err
 			}
-			argv := append(append([]string{}, p.Fields[1:]...), extra...)
+			argv, err := policy.Resolve(want, extra)
+			if err != nil {
+				return "", err
+			}
 			out, err := flow.RunCmd(ctx,
-				flow.Limits{Commands: []string{p.Fields[0]}, Timeout: timeout},
-				p.Fields[0], argv, "")
+				flow.Limits{Commands: []string{argv[0]}, Timeout: timeout},
+				argv[0], argv[1:], "")
 			if err != nil {
 				return "", err
 			}
@@ -90,7 +89,7 @@ func renderCmdResult(o *flow.Output) string {
 // Three verbs and no more: start, check, read. A model that could also list
 // and stop every job on the machine would be able to interfere with work it
 // did not begin, and nothing it does here should reach outside its own turn.
-func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
+func jobTools(h *Hub, policy flow.ToolPolicy, prefixes []flow.Prefix) map[string]Tool {
 	allowed := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
 		allowed = append(allowed, p.Raw)
@@ -102,7 +101,8 @@ func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
 				Name: "job_start",
 				Description: "Start a permitted command in the background and get a job id back " +
 					"immediately. Use this instead of cmd when the work takes more than a few " +
-					"seconds -- a test suite, a build, a deploy. Permitted commands: " + list,
+					"seconds -- a test suite, a build, a deploy. Permitted commands, with the only " +
+					"arguments each may take: " + policy.Describe(),
 				Parameters: object(map[string]any{
 					"command": prop("string", "Exactly one of the permitted commands: "+list),
 					"args":    arrayProp("string", "Extra arguments to append."),
@@ -113,7 +113,7 @@ func jobTools(h *Hub, prefixes []flow.Prefix) map[string]Tool {
 				if err != nil {
 					return "", err
 				}
-				j, err := StartJob(h, allowed, Job{
+				j, err := StartJob(h, policy, Job{
 					Command: str(args, "command"), Thread: ThreadOf(ctx),
 				}, extra)
 				if err != nil {

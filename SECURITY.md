@@ -11,6 +11,7 @@ vulnerability** on this repository. Do not open a public issue for it.
 
 These are known and not yet fixed. See [Limits](README.md#limits).
 
-- An allowed `cmd` or job prefix does not restrict the arguments that follow,
-  and child processes inherit the environment.
+- The `cmd` and job tools are not a sandbox. Their arguments are limited to the
+  operator's patterns, but a permitted command runs with the user's rights and
+  inherits the environment, including any tokens in it.
 - Self-updates are unsigned and are not checked for being newer.

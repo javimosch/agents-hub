@@ -126,6 +126,7 @@ func configCmd(fl *flags) {
 				"token_set": cfg.Token != "", "provider_key_set": cfg.ProviderKey != "",
 				"allow_cmds": cfg.AllowCmds, "allow_hosts": cfg.AllowHosts,
 				"allow_tool_cmds": cfg.AllowToolCmds,
+				"allow_tool_args": cfg.AllowToolArgs,
 				"model_limits":    cfg.ModelLimits, "compact_at": cfg.CompactAt,
 				"daily_token_budget": cfg.DailyTokenBudget,
 				"job_retention_days": cfg.JobRetentionDays,
@@ -253,8 +254,12 @@ func applyConfigSet(fl *flags, p *Config) (changed []string, asked bool) {
 	}
 	for _, c := range fl.list("deny-tool-cmd") {
 		p.AllowToolCmds = without(p.AllowToolCmds, c)
+		// Permitting the command again must not bring old rules back.
+		delete(p.AllowToolArgs, strings.Join(strings.Fields(c), " "))
 		changed = append(changed, "allow_tool_cmds")
 	}
+	ruled, ruleAsked := applyToolArgRules(fl, p)
+	changed, asked = append(changed, ruled...), asked || ruleAsked
 	for _, c := range fl.list("deny-cmd") {
 		p.AllowCmds = without(p.AllowCmds, c)
 		changed = append(changed, "allow_cmds")

@@ -502,7 +502,7 @@ chk "and as not needing memgraph"     "False"   "$("$AHUB" tool list | python3 -
 chk "cmd needs a permitted command"   "85"      "$(code chat --agent helper --tools cmd --message x)"
 chkin "and says how to permit one"    "--allow-tool-cmd" "$(errj error.message)"
 
-a config set --allow-tool-cmd "echo hello" --allow-tool-cmd "git log" >/dev/null
+a config set --allow-tool-cmd "echo hello" --allow-tool-cmd "git log" --allow-tool-arg "echo hello *" >/dev/null
 chk "config lists the prefixes"       "echo hello" "$(a config show | j config.allow_tool_cmds.0)"
 
 tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"world\"]}"}'
@@ -535,7 +535,16 @@ chkin "a bare string arg is accepted"  "hello there" "$(a chat --agent helper --
 a config set --deny-tool-cmd "echo hello" >/dev/null
 tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"world\"]}"}'
 chkin "revoking a prefix takes effect" "is not permitted here" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
-a config set --allow-tool-cmd "echo hello" >/dev/null
+a config set --allow-tool-cmd "echo hello" --allow-tool-arg "echo hello *" >/dev/null
+
+# A prefix alone is not a boundary: each further argument must be listed.
+tool_mode "{\"tool\":\"cmd\",\"args\":\"{\\\"command\\\":\\\"git log\\\",\\\"args\\\":[\\\"--output=$WORK/pwned\\\"]}\"}"
+chkin "an unlisted flag is refused"    "is not permitted after" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+chk "and writes nothing"              "False"   "$([ -e "$WORK/pwned" ] && echo True || echo False)"
+tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"-n\"]}"}'
+chkin "a * rule does not admit a flag" "is not permitted after" "$(a chat --agent helper --tools cmd --message x | j tool_runs.0.failed)"
+chk "a rule for nothing is refused"   "85"      "$(code config set --allow-tool-arg 'rm -rf')"
+chkin "config shows the rules"        "*"       "$(a config show | j 'config.allow_tool_args')"
 
 # An agent given only cmd must run on a machine with no memgraph at all.
 tool_mode '{"tool":"cmd","args":"{\"command\":\"echo hello\",\"args\":[\"nomem\"]}"}'
@@ -546,7 +555,7 @@ tool_mode '{"args":"{\"query\":\"ports\"}"}'
 # A turn cannot wait: a test suite or a deploy outlives the provider timeout.
 # A job outlives the process that started it, which is also what lets a
 # schedule begin something and a later run collect it.
-a config set --allow-tool-cmd "seq" --allow-tool-cmd "sleep" >/dev/null
+a config set --allow-tool-cmd "seq" --allow-tool-cmd "sleep" --allow-tool-arg "seq *" --allow-tool-arg "sleep *" >/dev/null
 chk "adding a permitted command twice is fine" "0" "$(code config set --allow-tool-cmd seq)"
 
 JB="$(a job start --command seq --args 3)"
@@ -561,6 +570,7 @@ chk "output survives the process that started it" "True" "$(a job output "$JID" 
 
 # The same allowlist as the cmd tool: a human starting a job by hand is bound
 # by what this machine permits a model to run.
+chk "an unlisted job argument is refused" "85" "$(code job start --command seq --args=-w)"
 chk "an unpermitted job is refused"   "85"      "$(code job start --command "rm -rf")"
 chkin "and says how to permit it"     "not permitted" "$(errj error.message)"
 
@@ -574,7 +584,7 @@ chk "and reads as stopped"            "stopped" "$(a job show "$SL" | j job.stat
 # A command starts processes of its own, and stopping the job must reach them.
 alive() { pgrep -fx "sleep $1" >/dev/null && echo alive || echo gone; }
 settle() { for _ in $(seq 1 50); do [ "$(alive "$1")" = "$2" ] && break; sleep 0.1; done; alive "$1"; }
-a config set --allow-tool-cmd 'sh -c' >/dev/null
+a config set --allow-tool-cmd 'sh -c' --allow-tool-arg 'sh -c *' >/dev/null
 TREE="$(a job start --command 'sh -c' --args 'sleep 6171 & wait' | j job.id)"
 chk "a job's grandchild starts"       "alive"   "$(settle 6171 alive)"
 a job stop "$TREE" >/dev/null

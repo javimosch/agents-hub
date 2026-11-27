@@ -135,7 +135,7 @@ func jobStart(fl *flags) {
 		out.Fail(out.ValidationError, "validation_error",
 			`give a command: ahub job start --command "gh pr list"`)
 	}
-	j, err := hub.StartJob(h, cfg.AllowToolCmds, hub.Job{Command: command}, fl.list("args"))
+	j, err := hub.StartJob(h, cfg.toolPolicy(), hub.Job{Command: command}, fl.list("args"))
 	if err != nil {
 		out.Fail(out.InvalidValue, "invalid_value", err.Error(),
 			"ahub config set --allow-tool-cmd '<prefix>'")
@@ -158,12 +158,7 @@ func jobExec(fl *flags) {
 	}
 	// Re-checked here, against this machine's current allowlist, because the
 	// record has been out of this process's hands since it was written.
-	prefixes, err := flow.ParsePrefixes(cfg.AllowToolCmds)
-	if err != nil {
-		finishJob(h, j, 0, err)
-		return
-	}
-	argv, bin, perr := hub.ResolveJobCommand(prefixes, j)
+	argv, bin, perr := hub.ResolveJobCommand(cfg.toolPolicy(), j)
 	if perr != nil {
 		finishJob(h, j, 0, perr)
 		return

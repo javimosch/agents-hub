@@ -229,7 +229,7 @@ func attachAgentContext(fl *flags, cfg Config, a hub.Agent, opts *hub.EvalOption
 		reg, err := hub.NewRegistry(hub.RegistryOptions{
 			Names: a.Tools, Memory: mc, Project: a.MemoryProject,
 			AllowWrites: fl.has("allow-writes"),
-			ToolCmds:    cfg.AllowToolCmds, Timeout: cfg.timeout(),
+			Policy:      cfg.toolPolicy(), Timeout: cfg.timeout(),
 		})
 		if err != nil {
 			out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")

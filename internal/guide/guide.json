@@ -191,7 +191,7 @@
     },
     {
       "name": "the cmd tool",
-      "what": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and may append arguments; it can never change the prefix, so allowing 'git log' does not allow 'git push'. Empty by default, which means the tool does not exist until someone permits something."
+      "what": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and can never change it. A prefix alone takes no arguments: each further one must match a pattern listed with `ahub config set --allow-tool-arg 'git log --oneline --since=*'`, where * is any text but never admits a flag unless the pattern starts with '-'. This is not a sandbox. Empty by default, which means the tool does not exist until someone permits something."
     },
     {
       "name": "jobs",
@@ -253,7 +253,7 @@
     "A case whose model call failed counts as FAILED, never skipped: an outage must never read as an improvement.",
     "`ahub eval run` exits 0 whatever it scored -- the code says the eval ran, the data says how it went. --strict exits 1, deliberately outside cli-output-spec's 80-119 bands, because the tool worked and the agent did not. 105 would tell an agent to retry a failing eval and expect a different answer.",
     "A judge assertion with no judge configured FAILS rather than passing: a check that silently becomes a no-op is worse than no check.",
-    "The cmd tool has its own allowlist, separate from a flow's --allow-cmd. A flow step runs argv a human wrote; the cmd tool runs argv a model wrote, so it allowlists PREFIXES rather than bare command names.",
+    "The cmd tool has its own allowlist, separate from a flow's --allow-cmd. A flow step runs argv a human wrote; the cmd tool runs argv a model wrote, so it allowlists PREFIXES rather than bare command names, and a prefix takes no further arguments until --allow-tool-arg lists them. If a command is refused for its arguments, an operator has to permit them.",
     "cmd is not behind --allow-writes, deliberately: the prefix list is a stronger and more specific gate, and a flag you must pass even to run `git log` teaches people the flag means nothing.",
     "The result a model sees starts with the exit code, because that is the part worth branching on -- and every tool in this ecosystem follows the same convention.",
     "A job's exit code survives because the process ahub spawns is ahub itself, supervising the command. Spawning the command directly would leave nobody to reap it once the turn exits.",
