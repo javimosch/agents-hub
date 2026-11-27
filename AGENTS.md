@@ -52,6 +52,11 @@ repo runs on.
 - **Run anything with a deadline through `proc.Run`.** A bare `cmd.Run` on an
   `exec.CommandContext` kills one process, and a child holding the output pipe
   can then outlive the timeout, or hang the call for good.
+- **A new command or flag goes in `help-json` and the guide.** `gate` refuses
+  any flag the catalog does not list, and `--help` answers from it. The specs at
+  cli-specs.intrane.fr (output, guide, update, feedback) are held by
+  `*_spec_test.go`.
+- **Publish only with `scripts/publish.sh`.**
 - **A tool failure goes back to the model, a turn failure goes back to the
   agent.** The first is information the model can act on; the second is a
   stored, resumable thread plus an exit code.

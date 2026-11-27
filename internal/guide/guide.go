@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -42,36 +43,47 @@ func Human(version string) (string, error) {
 		}
 		b.WriteString("\n")
 	}
-	list := func(title, key string) {
-		items, ok := m[key].([]any)
-		if !ok || len(items) == 0 {
-			return
-		}
-		fmt.Fprintf(&b, "## %s\n\n", title)
-		for _, it := range items {
-			switch t := it.(type) {
-			case string:
-				fmt.Fprintf(&b, "- %s\n", t)
-			case map[string]any:
-				if c, ok := t["command"]; ok {
-					fmt.Fprintf(&b, "- `%v`\n", c)
-					if w, ok := t["why"]; ok {
-						fmt.Fprintf(&b, "  %v\n", w)
-					}
-					continue
-				}
-				if n, ok := t["name"]; ok {
-					fmt.Fprintf(&b, "- **%v** — %v\n", n, t["what"])
-					continue
-				}
-				fmt.Fprintf(&b, "- %v\n", t)
-			}
-		}
-		b.WriteString("\n")
-	}
-	list("The loop", "loop")
-	list("Concepts", "concepts")
-	list("Gotchas", "gotchas")
-	list("Recipes", "recipes")
+	section(&b, "The loop", m["loop"])
+	section(&b, "Commands", m["commands"])
+	section(&b, "Examples", m["examples"])
+	section(&b, "Concepts", m["concepts"])
+	section(&b, "Gotchas", m["gotchas"])
 	return b.String(), nil
+}
+
+// section renders one part of the guide: a list, a list of examples, or a
+// keyed object whose values are text or lists of commands.
+func section(b *strings.Builder, title string, v any) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	switch t := v.(type) {
+	case []any:
+		for _, it := range t {
+			if example, ok := it.(map[string]any); ok {
+				fmt.Fprintf(b, "- %v\n", example["goal"])
+				steps, _ := example["do"].([]any)
+				for _, step := range steps {
+					fmt.Fprintf(b, "  `%v`\n", step)
+				}
+				continue
+			}
+			fmt.Fprintf(b, "- %v\n", it)
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			if commands, ok := t[k].([]any); ok {
+				fmt.Fprintf(b, "- **%s**\n", k)
+				for _, c := range commands {
+					fmt.Fprintf(b, "  `%v`\n", c)
+				}
+				continue
+			}
+			fmt.Fprintf(b, "- **%s** — %v\n", k, t[k])
+		}
+	}
+	b.WriteString("\n")
 }

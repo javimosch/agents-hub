@@ -19,6 +19,9 @@ const runMainEnv = "AHUB_TEST_RUN_MAIN"
 // a caller sees can only be observed from outside.
 func TestMain(m *testing.M) {
 	if os.Getenv(runMainEnv) == "1" {
+		if v := os.Getenv("AHUB_TEST_VERSION"); v != "" {
+			Version = v
+		}
 		main()
 		os.Exit(0)
 	}

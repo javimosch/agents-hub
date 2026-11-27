@@ -13,6 +13,7 @@ import (
 	"github.com/javimosch/agents-hub/internal/bkn"
 	"github.com/javimosch/agents-hub/internal/hub"
 	"github.com/javimosch/agents-hub/internal/out"
+	"github.com/javimosch/agents-hub/internal/update"
 )
 
 // Version is stamped at build time (-ldflags "-X main.Version=v0.1.0").
@@ -22,11 +23,16 @@ func main() {
 	argv := os.Args[1:]
 	if len(argv) == 0 {
 		usage()
-		os.Exit(out.InvalidArguments)
+		out.Fail(out.InvalidArguments, "unknown_command", "no command given",
+			"ahub help-json", "ahub guide")
 	}
 
 	cmd := argv[0]
 	fl := parse(argv[1:])
+
+	if gate(cmd, fl) {
+		return
+	}
 
 	switch cmd {
 	case "help", "--help", "-h":
@@ -69,6 +75,8 @@ func main() {
 		modelCmd(fl)
 	case "spend":
 		spendCmd(fl)
+	case "feedback":
+		feedbackCmd(fl)
 	case "update":
 		updateCmd(fl)
 	case "install":
@@ -85,6 +93,12 @@ func main() {
 // there is no token: "not authenticated" is a different problem from "the
 // backend said no", and an agent must be able to tell them apart.
 func client(fl *flags) (*bkn.Client, Config) {
+	// Every command that talks to a server comes through here. Release builds
+	// only: a build from source is not "behind" the published one, and
+	// `update` could replace it with older code.
+	if Version != "dev" {
+		update.Nudge(out.Log)
+	}
 	cfg, _, err := resolve(fl)
 	if err != nil {
 		out.Fail(out.ValidationError, "config_error", err.Error())
@@ -210,6 +224,7 @@ func usage() {
   ahub install [--prefix <dir>]         put this binary on $PATH
   ahub update [--check] [--force]       fetch the published build
 
+  ahub feedback <message> [--kind bug]  tell the author; sends only what you type
   ahub guide [--human]                  the mental model
   ahub help-json                        the command catalog
 

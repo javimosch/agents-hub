@@ -7,18 +7,21 @@ import (
 )
 
 func agentCmd(fl *flags) {
-	h, _ := hubFor(fl)
+	// Built per case, so a bad subcommand is reported as one rather than as a
+	// missing token.
+	client := func() *hub.Hub { h, _ := hubFor(fl); return h }
 	switch fl.arg(0) {
 	case "create":
-		agentCreate(h, fl)
+		agentCreate(client(), fl)
 	case "", "list", "ls":
-		agentList(h, fl)
+		agentList(client(), fl)
 	case "get", "show":
+		h := client()
 		out.Data(map[string]any{"agent": resolveAgent(h, agentRef(fl))})
 	case "update":
-		agentUpdate(h, fl)
+		agentUpdate(client(), fl)
 	case "rm", "delete":
-		agentDelete(h, fl)
+		agentDelete(client(), fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"agent takes create, list, get, update, rm")

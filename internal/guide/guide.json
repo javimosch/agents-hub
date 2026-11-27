@@ -1,5 +1,6 @@
 {
   "tool": "ahub",
+  "ahub": "A CLI that runs configured AI agents non-interactively.",
   "one_liner": "Run a configured agent from the command line, non-interactively, with the conversation stored durably in bkn.",
   "model": {
     "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/agents, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
@@ -15,209 +16,175 @@
     "compaction": "Threads grow. Every response reports prompt_tokens, so the size is measured rather than estimated, and a thread is folded into a summary once it crosses a fraction of the model's window (60% by default). If the provider refuses a prompt anyway, the window it names is learned and written to the profile, the thread is folded, and the turn is retried once."
   },
   "loop": [
+    "ahub setup --admin-token <t>  # Once per bkn instance, by a human. Declares the collections and their owner-scoped access policy. Never needed again, and never run on the serving path.",
+    "ahub login --email <e> --password <p>  # Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see.",
+    "ahub agent create --name helper --model <m> --system \"...\"  # Saves the configuration once so later turns are one short command.",
+    "ahub chat --agent helper --message \"...\"  # Opens a thread and answers. Prints the thread id; pass it back with --thread to continue.",
+    "ahub chat --agent helper --thread <id> --message \"...\"  # Continues an existing conversation. History is replayed to the model automatically.",
+    "ahub thread show <id>  # The full transcript, in order, with per-message token counts.",
+    "ahub agent update helper --memory-project <p> --skills a,b  # Gives an agent a memory scope and a set of procedures. Both are opt-in and both are named in the configuration, so an answer can be reproduced from it.",
+    "ahub memory recall --query \"...\" --project <p>  # Read memgraph directly, rendered through the same budget a chat turn would use, so you see what the model would see.",
+    "ahub skill recommend \"<task>\"  # Ask memgraph's skill graph which procedure fits, then `ahub skill show <name>` to read it before spending tokens on it.",
+    "ahub tool list  # What a model can be given. Needs no token and no backend: discover the surface before wiring anything.",
+    "ahub chat --agent helper --tools memory_recall,skill_show --message \"...\"  # Let the model look things up for itself. The answer reports steps and tool_runs, so you can see what it actually did.",
+    "ahub flow validate --file f.json  # Because the path is data it can be checked before it costs anything: unknown targets, unreachable steps, variables nothing sets, commands this machine will refuse.",
+    "ahub flow run <name> --input k=v  # Runs until it ends or needs input. Exit 92 means it paused and names what it needs; exit 105 means a step failed. The run reports steps, llm_calls and tokens.",
+    "ahub flow resume <run-id> --input k=v  # Continue a paused run. The run is stored in bkn, so this works from another machine or another day.",
+    "ahub install  # Copy the binary you already have to ~/.local/bin. Idempotent, no sudo, and it never edits your shell profile.",
+    "ahub update [--check]  # Fetch the published build. The version is sha256[:12] of the artifact, so there is no number to bump: identical bytes are the same version.",
+    "ahub schedule create --name nightly --agent helper --prompt \"...\" --every 6h  # A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub schedule run <name>`.",
+    "ahub schedule tick  # Runs everything that is due. This is what a timer calls: one entry point, however many schedules, no daemon holding state between them.",
+    "ahub eval validate --file quality.json  # Every regex compiles and every bound parses before a single token is spent finding out otherwise.",
+    "ahub eval run quality [--strict]  # Scores an agent, case by case, on stderr as it goes. Exits 0 however it scored; --strict exits 1 when assertions failed, for a pipeline or a schedule that should go red.",
+    "ahub eval compare <before> <after>  # The only question that matters after a change: what got fixed, what regressed, what still fails, and what it cost.",
+    "ahub job start --command 'gh pr list' && ahub job wait <id>  # Work that outlives a turn. job list, job output and job stop are there too.",
+    "ahub model list  # Context windows, shared through bkn. One machine learns a window from a refused call and the rest already know it.",
+    "ahub spend  # What today has cost against the day's allowance. The counter is in bkn (a fact), the allowance is in the profile (a decision)."
+  ],
+  "commands": {
+    "setup": [
+      "ahub setup --admin-token <t>",
+      "ahub login --email <e> --password <p>",
+      "ahub whoami",
+      "ahub config set --provider-url <url> --provider-key <key>",
+      "ahub config show"
+    ],
+    "agents": [
+      "ahub agent create --name <n> --model <m>",
+      "ahub chat --agent <n> --message <m>",
+      "ahub thread list",
+      "ahub thread show <id>",
+      "ahub schedule create --name <n> --agent <a> --prompt <p>",
+      "ahub schedule tick",
+      "ahub eval run <name>",
+      "ahub model list",
+      "ahub spend"
+    ],
+    "reach": [
+      "ahub tool list",
+      "ahub memory recall --query <q>",
+      "ahub skill recommend <task>",
+      "ahub flow validate --file <f.json>",
+      "ahub flow run <name>",
+      "ahub job start --command <prefix>",
+      "ahub job list"
+    ],
+    "learn": [
+      "ahub guide --human",
+      "ahub help-json",
+      "ahub <command> --help",
+      "ahub version"
+    ],
+    "maintain": [
+      "ahub install",
+      "ahub uninstall",
+      "ahub update --check",
+      "ahub update",
+      "ahub feedback <message> --kind bug"
+    ]
+  },
+  "examples": [
     {
-      "command": "ahub setup --admin-token <t>",
-      "why": "Once per bkn instance, by a human. Declares the collections and their owner-scoped access policy. Never needed again, and never run on the serving path."
+      "goal": "The answer alone, for a pipeline.",
+      "do": [
+        "ahub chat --agent helper --message \"$(cat prompt.txt)\" | jq -r .content"
+      ]
     },
     {
-      "command": "ahub login --email <e> --password <p>",
-      "why": "Stores a user token in the active profile. Every later call carries this token, so bkn decides what you can see."
+      "goal": "The five most recently touched conversations with one agent.",
+      "do": [
+        "ahub thread list --agent helper --limit 5"
+      ]
     },
     {
-      "command": "ahub agent create --name helper --model <m> --system \"...\"",
-      "why": "Saves the configuration once so later turns are one short command."
+      "goal": "Watch the answer arrive while still getting a parseable stream.",
+      "do": [
+        "ahub chat --agent helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'"
+      ]
     },
     {
-      "command": "ahub chat --agent helper --message \"...\"",
-      "why": "Opens a thread and answers. Prints the thread id; pass it back with --thread to continue."
+      "goal": "One turn with recalled context, without changing the saved agent.",
+      "do": [
+        "ahub chat --agent helper --memory-project machin --message \"why does the daemon loop leak?\""
+      ]
     },
     {
-      "command": "ahub chat --agent helper --thread <id> --message \"...\"",
-      "why": "Continues an existing conversation. History is replayed to the model automatically."
+      "goal": "Load a procedure for one turn.",
+      "do": [
+        "ahub chat --agent helper --skill agent-first-cli-specs --message \"audit this exit code table\""
+      ]
     },
     {
-      "command": "ahub thread show <id>",
-      "why": "The full transcript, in order, with per-message token counts."
+      "goal": "The answer plus exactly what informed it.",
+      "do": [
+        "ahub chat ... | jq '{answer:.content, remembered:.memory.used, skills:.skills.loaded}'"
+      ]
     },
     {
-      "command": "ahub agent update helper --memory-project <p> --skills a,b",
-      "why": "Gives an agent a memory scope and a set of procedures. Both are opt-in and both are named in the configuration, so an answer can be reproduced from it."
+      "goal": "The answer plus the path it took to get there.",
+      "do": [
+        "ahub chat --agent agent --tools memory_recall --message '...' | jq '{answer:.content, steps, tools:[.tool_runs[].name]}'"
+      ]
     },
     {
-      "command": "ahub memory recall --query \"...\" --project <p>",
-      "why": "Read memgraph directly, rendered through the same budget a chat turn would use, so you see what the model would see."
+      "goal": "Where the money went: five deterministic steps and one model call.",
+      "do": [
+        "ahub flow run release-notes --input repo=~/ai/agents-hub | jq '{steps, llm_calls, tokens}'"
+      ]
     },
     {
-      "command": "ahub skill recommend \"<task>\"",
-      "why": "Ask memgraph's skill graph which procedure fits, then `ahub skill show <name>` to read it before spending tokens on it."
+      "goal": "Run a scheduled flow by hand and read its history back out of bkn.",
+      "do": [
+        "ahub flow run bkn-backup && ahub flow runs --flow bkn-backup --limit 5"
+      ]
     },
     {
-      "command": "ahub tool list",
-      "why": "What a model can be given. Needs no token and no backend: discover the surface before wiring anything."
+      "goal": "What one autonomous run did, and what it cost.",
+      "do": [
+        "ahub schedule run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'"
+      ]
     },
     {
-      "command": "ahub chat --agent helper --tools memory_recall,skill_show --message \"...\"",
-      "why": "Let the model look things up for itself. The answer reports steps and tool_runs, so you can see what it actually did."
+      "goal": "An agent reaching a real system, through a command shape you chose.",
+      "do": [
+        "ahub config set --allow-tool-cmd 'gh pr list' && ahub chat --agent helper --tools cmd --message 'what PRs are open?'"
+      ]
     },
     {
-      "command": "ahub flow validate --file f.json",
-      "why": "Because the path is data it can be checked before it costs anything: unknown targets, unreachable steps, variables nothing sets, commands this machine will refuse."
-    },
-    {
-      "command": "ahub flow run <name> --input k=v",
-      "why": "Runs until it ends or needs input. Exit 92 means it paused and names what it needs; exit 105 means a step failed. The run reports steps, llm_calls and tokens."
-    },
-    {
-      "command": "ahub flow resume <run-id> --input k=v",
-      "why": "Continue a paused run. The run is stored in bkn, so this works from another machine or another day."
-    },
-    {
-      "command": "ahub install",
-      "why": "Copy the binary you already have to ~/.local/bin. Idempotent, no sudo, and it never edits your shell profile."
-    },
-    {
-      "command": "ahub update [--check]",
-      "why": "Fetch the published build. The version is sha256[:12] of the artifact, so there is no number to bump: identical bytes are the same version."
-    },
-    {
-      "command": "ahub schedule create --name nightly --agent helper --prompt \"...\" --every 6h",
-      "why": "A standing instruction. --every <duration> or --at HH:MM; anything more elaborate is a systemd timer calling `ahub schedule run <name>`."
-    },
-    {
-      "command": "ahub schedule tick",
-      "why": "Runs everything that is due. This is what a timer calls: one entry point, however many schedules, no daemon holding state between them."
-    },
-    {
-      "command": "ahub eval validate --file quality.json",
-      "why": "Every regex compiles and every bound parses before a single token is spent finding out otherwise."
-    },
-    {
-      "command": "ahub eval run quality [--strict]",
-      "why": "Scores an agent, case by case, on stderr as it goes. Exits 0 however it scored; --strict exits 1 when assertions failed, for a pipeline or a schedule that should go red."
-    },
-    {
-      "command": "ahub eval compare <before> <after>",
-      "why": "The only question that matters after a change: what got fixed, what regressed, what still fails, and what it cost."
-    },
-    {
-      "command": "ahub job start --command 'gh pr list' && ahub job wait <id>",
-      "why": "Work that outlives a turn. job list, job output and job stop are there too."
-    },
-    {
-      "command": "ahub model list",
-      "why": "Context windows, shared through bkn. One machine learns a window from a refused call and the rest already know it."
-    },
-    {
-      "command": "ahub spend",
-      "why": "What today has cost against the day's allowance. The counter is in bkn (a fact), the allowance is in the profile (a decision)."
+      "goal": "An ops flow with no model in it at all: measure the journal, compare against a budget, vacuum only when told to.",
+      "do": [
+        "ahub flow run log-budget   # measure, branch, act; llm_calls: 0"
+      ]
     }
   ],
-  "concepts": [
-    {
-      "name": "owner scoping",
-      "what": "bkn stamps every document with your user id from your token and filters reads by it. ahub never sends an owner field, so it cannot read or write another user's threads even if this code has a bug."
-    },
-    {
-      "name": "provider",
-      "what": "Any OpenAI-compatible /chat/completions endpoint: OpenAI, Mistral, Ollama, vLLM, OpenRouter. Set it once with `ahub config set --provider-url ... --provider-key ...`."
-    },
-    {
-      "name": "profile",
-      "what": "A named set of {bkn url, token, provider, model}, like an aws-cli profile. Switch with --profile or `ahub config set-profile <n>`."
-    },
-    {
-      "name": "seq",
-      "what": "Messages are ordered by an integer seq, not by timestamp, so two messages written in the same millisecond can never come back swapped."
-    },
-    {
-      "name": "memory",
-      "what": "Recall is delegated to the memgraph CLI: explicit argv, no shell, validated values, a timeout and a character budget. ahub implements no retrieval of its own and stores no embeddings."
-    },
-    {
-      "name": "skills",
-      "what": "A skill is a SKILL.md resolved by name through memgraph's skill graph. ahub reads only the file memgraph pointed at, only when the skill was named, and only if it is markdown."
-    },
-    {
-      "name": "budget",
-      "what": "Recalled memories are capped per-memory and in total (default 1200/6000 characters). This is the difference between memory as a feature and memory as a bill, since the block is re-sent every turn."
-    },
-    {
-      "name": "the tool loop",
-      "what": "Up to --max-steps (default 8) passes: each pass either answers or asks for tools, whose results are appended and fed back. Every agent and tool turn is stored, so a thread with tool calls resumes correctly."
-    },
-    {
-      "name": "two gates on writes",
-      "what": "Naming a tool enables it; a tool that changes state needs --allow-writes too. 'Give it tools' and 'let it change things' are different decisions and one flag would collapse them."
-    },
-    {
-      "name": "flow vs agent",
-      "what": "An agent improvises and pays per turn; a flow follows a path someone designed and pays only for its ask steps. Use a flow when the sequence is known and must be reproducible, an agent when it is not."
-    },
-    {
-      "name": "allowlists",
-      "what": "cmd and http steps can only reach commands and hosts allowed in the local profile, never ones named by the flow. A flow is data -- possibly data a model wrote -- so a flow that could name its own executables would be arbitrary code execution with extra steps."
-    },
-    {
-      "name": "derived variables",
-      "what": "A cmd or http step sets three: the output, <var>_code (exit status or HTTP status) and <var>_err. Branching on a cli-output-spec exit code is the point: 105 retry, 82 fix the arguments, 92 not there."
-    },
-    {
-      "name": "secrets",
-      "what": "Referenced as {{secret.NAME}} and resolved from the local profile, so a definition can be stored and shared without its credentials. Values are redacted before anything is written to a run."
-    },
-    {
-      "name": "script steps",
-      "what": "A script step runs a bkn script with YOUR token. bkn decides whether it may run, per script, next to the code being run -- so this tool needs no allowlist for it. An operator opens one with `bkn script update <name> --run-access user`. The script sees bkn.caller, so it can scope what it returns to whoever asked."
-    },
-    {
-      "name": "scheduled flows",
-      "what": "A flow plus a systemd timer is the whole of autonomy: `ahub flow run <name>` on a schedule, no daemon and no user in the loop. The flow exits non-zero when a step fails, so a failure shows up in `systemctl list-units --failed`, and every run is recorded in bkn where `ahub flow runs` can read it back."
-    },
-    {
-      "name": "the scratchpad",
-      "what": "One bounded note (4000 chars) carried between runs, written by the agent through the scratchpad tool and readable or correctable by a human with `ahub schedule scratchpad <name>`. Durable knowledge goes to memgraph via memory_save instead; the scratchpad is only 'where I got to last time'."
-    },
-    {
-      "name": "agent vs flow",
-      "what": "A flow is a path someone designed and pays only for its ask steps. A schedule lets an agent decide what to do, on a cadence, and pays every run. Reach for a flow when the sequence is known; a schedule when it is not."
-    },
-    {
-      "name": "agent vs schedule",
-      "what": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences."
-    },
-    {
-      "name": "assertions",
-      "what": "contains, not_contains, equals, matches, max_tokens, max_steps, tool_used, tool_not_used and judge. All free except judge, which asks a second agent for a PASS/FAIL and a reason. Name a separate judge agent: a model grading its own homework is a weaker signal than a second one."
-    },
-    {
-      "name": "the cmd tool",
-      "what": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and can never change it. A prefix alone takes no arguments: each further one must match a pattern listed with `ahub config set --allow-tool-arg 'git log --oneline --since=*'`, where * is any text but never admits a flag unless the pattern starts with '-'. This is not a sandbox. Empty by default, which means the tool does not exist until someone permits something."
-    },
-    {
-      "name": "jobs",
-      "what": "Started through the same prefix allowlist as the cmd tool, so a human starting one by hand is bound by what this machine permits a model to run. A model gets three verbs -- job_start, job_wait, job_output -- and cannot list or stop work it did not begin."
-    },
-    {
-      "name": "compaction",
-      "what": "Folds the older half of a thread into a summary stored on the thread. The messages are never deleted: replay skips what the summary covers, but the record of what was said survives for anyone who later needs to know why an agent did something."
-    },
-    {
-      "name": "how deterministic a flow is",
-      "what": "The control flow is: no step but ask calls a model, the operators are a closed set, first match wins, and an unset {{variable}} fails the step rather than substituting empty. A run reports llm_calls and tokens, so 'this costs nothing' is checkable rather than claimed. What is NOT deterministic is what the commands say -- that is the point of asking them."
-    },
-    {
-      "name": "privileged steps",
-      "what": "Do not run ahub as root. Allowlist the privileged SHAPE instead: `--allow-cmd 'sudo journalctl'` permits journalctl as root and nothing else, because the allowlist matches whole-field prefixes. The real gate is the sudoers rule, which the OS enforces and audits; ahub's allowlist is the second one. For anything genuinely dangerous, put the work in a root-owned systemd unit and let the flow only start it -- then a compromised ahub can trigger one predefined action, not compose a new one."
-    },
-    {
-      "name": "what lives where",
-      "what": "bkn holds everything that should travel: agents, threads, flows, schedules, evals, jobs, and what has been learned about models. The local profile holds what should NOT travel -- your token, your provider key, your secrets, and the allowlists -- because a credential and a capability grant are policies of one machine, and a new machine must not inherit them by logging in. memgraph holds memories and skills in its own store."
-    },
-    {
-      "name": "guards for unattended work",
-      "what": "A schedule takes a lease before it runs, so a timer and a slow run cannot overlap; the lease expires (30m) because a killed process cannot release its own. A tick also reaps jobs whose supervisor is gone. `ahub job prune` removes finished jobs and their output. A daily token budget refuses a turn BEFORE it spends, counted atomically in bkn. A flow has its own deadline as well as a per-step one."
-    }
-  ],
+  "concepts": {
+    "owner scoping": "bkn stamps every document with your user id from your token and filters reads by it. ahub never sends an owner field, so it cannot read or write another user's threads even if this code has a bug.",
+    "provider": "Any OpenAI-compatible /chat/completions endpoint: OpenAI, Mistral, Ollama, vLLM, OpenRouter. Set it once with `ahub config set --provider-url ... --provider-key ...`.",
+    "profile": "A named set of {bkn url, token, provider, model}, like an aws-cli profile. Switch with --profile or `ahub config set-profile <n>`.",
+    "seq": "Messages are ordered by an integer seq, not by timestamp, so two messages written in the same millisecond can never come back swapped.",
+    "memory": "Recall is delegated to the memgraph CLI: explicit argv, no shell, validated values, a timeout and a character budget. ahub implements no retrieval of its own and stores no embeddings.",
+    "skills": "A skill is a SKILL.md resolved by name through memgraph's skill graph. ahub reads only the file memgraph pointed at, only when the skill was named, and only if it is markdown.",
+    "budget": "Recalled memories are capped per-memory and in total (default 1200/6000 characters). This is the difference between memory as a feature and memory as a bill, since the block is re-sent every turn.",
+    "the tool loop": "Up to --max-steps (default 8) passes: each pass either answers or asks for tools, whose results are appended and fed back. Every agent and tool turn is stored, so a thread with tool calls resumes correctly.",
+    "two gates on writes": "Naming a tool enables it; a tool that changes state needs --allow-writes too. 'Give it tools' and 'let it change things' are different decisions and one flag would collapse them.",
+    "flow vs agent": "An agent improvises and pays per turn; a flow follows a path someone designed and pays only for its ask steps. Use a flow when the sequence is known and must be reproducible, an agent when it is not.",
+    "allowlists": "cmd and http steps can only reach commands and hosts allowed in the local profile, never ones named by the flow. A flow is data -- possibly data a model wrote -- so a flow that could name its own executables would be arbitrary code execution with extra steps.",
+    "derived variables": "A cmd or http step sets three: the output, <var>_code (exit status or HTTP status) and <var>_err. Branching on a cli-output-spec exit code is the point: 105 retry, 82 fix the arguments, 92 not there.",
+    "secrets": "Referenced as {{secret.NAME}} and resolved from the local profile, so a definition can be stored and shared without its credentials. Values are redacted before anything is written to a run.",
+    "script steps": "A script step runs a bkn script with YOUR token. bkn decides whether it may run, per script, next to the code being run -- so this tool needs no allowlist for it. An operator opens one with `bkn script update <name> --run-access user`. The script sees bkn.caller, so it can scope what it returns to whoever asked.",
+    "scheduled flows": "A flow plus a systemd timer is the whole of autonomy: `ahub flow run <name>` on a schedule, no daemon and no user in the loop. The flow exits non-zero when a step fails, so a failure shows up in `systemctl list-units --failed`, and every run is recorded in bkn where `ahub flow runs` can read it back.",
+    "the scratchpad": "One bounded note (4000 chars) carried between runs, written by the agent through the scratchpad tool and readable or correctable by a human with `ahub schedule scratchpad <name>`. Durable knowledge goes to memgraph via memory_save instead; the scratchpad is only 'where I got to last time'.",
+    "agent vs flow": "A flow is a path someone designed and pays only for its ask steps. A schedule lets an agent decide what to do, on a cadence, and pays every run. Reach for a flow when the sequence is known; a schedule when it is not.",
+    "agent vs schedule": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences.",
+    "assertions": "contains, not_contains, equals, matches, max_tokens, max_steps, tool_used, tool_not_used and judge. All free except judge, which asks a second agent for a PASS/FAIL and a reason. Name a separate judge agent: a model grading its own homework is a weaker signal than a second one.",
+    "the cmd tool": "Lets an agent run commands, but only shapes an operator wrote down: `ahub config set --allow-tool-cmd 'gh pr list'`. The model picks a permitted prefix and can never change it. A prefix alone takes no arguments: each further one must match a pattern listed with `ahub config set --allow-tool-arg 'git log --oneline --since=*'`, where * is any text but never admits a flag unless the pattern starts with '-'. This is not a sandbox. Empty by default, which means the tool does not exist until someone permits something.",
+    "jobs": "Started through the same prefix allowlist as the cmd tool, so a human starting one by hand is bound by what this machine permits a model to run. A model gets three verbs -- job_start, job_wait, job_output -- and cannot list or stop work it did not begin.",
+    "compaction": "Folds the older half of a thread into a summary stored on the thread. The messages are never deleted: replay skips what the summary covers, but the record of what was said survives for anyone who later needs to know why an agent did something.",
+    "how deterministic a flow is": "The control flow is: no step but ask calls a model, the operators are a closed set, first match wins, and an unset {{variable}} fails the step rather than substituting empty. A run reports llm_calls and tokens, so 'this costs nothing' is checkable rather than claimed. What is NOT deterministic is what the commands say -- that is the point of asking them.",
+    "privileged steps": "Do not run ahub as root. Allowlist the privileged SHAPE instead: `--allow-cmd 'sudo journalctl'` permits journalctl as root and nothing else, because the allowlist matches whole-field prefixes. The real gate is the sudoers rule, which the OS enforces and audits; ahub's allowlist is the second one. For anything genuinely dangerous, put the work in a root-owned systemd unit and let the flow only start it -- then a compromised ahub can trigger one predefined action, not compose a new one.",
+    "what lives where": "bkn holds everything that should travel: agents, threads, flows, schedules, evals, jobs, and what has been learned about models. The local profile holds what should NOT travel -- your token, your provider key, your secrets, and the allowlists -- because a credential and a capability grant are policies of one machine, and a new machine must not inherit them by logging in. memgraph holds memories and skills in its own store.",
+    "guards for unattended work": "A schedule takes a lease before it runs, so a timer and a slow run cannot overlap; the lease expires (30m) because a killed process cannot release its own. A tick also reaps jobs whose supervisor is gone. `ahub job prune` removes finished jobs and their output. A daily token budget refuses a turn BEFORE it spends, counted atomically in bkn. A flow has its own deadline as well as a per-step one."
+  },
   "gotchas": [
     "The user message is stored before the model is called. A provider timeout costs you the answer, not the question: retry with the same --thread.",
     "--stream emits NDJSON delta objects on stdout, then the final envelope. It is not bare text; parse per line.",
@@ -267,61 +234,16 @@
     "A job's output tail (16 KB) is stored with its record so another machine can read it; the full log stays where it ran. `ahub job output` says which one you got -- \"local file (complete)\" or \"recorded tail (portable)\".",
     "A schedule that appears not to run may be leased: `ahub schedule show <name>` shows who holds it. A lease is released after the run and expires after 30 minutes if the holder died.",
     "The daily budget is checked before a turn, not after -- a budget enforced afterwards is a report. It refuses with exit 95 budget_spent, because the state conflicts with the request rather than the request being wrong.",
-    "`ahub flow run --timeout` bounds the whole flow; --step-timeout bounds one command. When a command is stopped, the error names which of the two clocks ran out."
+    "`ahub flow run --timeout` bounds the whole flow; --step-timeout bounds one command. When a command is stopped, the error names which of the two clocks ran out.",
+    "`--help` or `-h` on any command prints its entry from help-json and runs nothing. A flag a command does not have is exit 80 unknown_flag, also before anything runs.",
+    "`ahub update --check` exits 5 when a different build is published, with the data on stdout. It compares content hashes, so a different build can be an older one. Builds are not signed: only update from a server you trust.",
+    "A release build checks for a newer one at most once a day, on commands that talk to a server, and says so on stderr. AHUB_NO_NUDGE=1 or CI turns it off. A build from source never checks.",
+    "`ahub feedback` sends your message, kind, context and the tool version to https://feedback.intrane.fr, and nothing unless you run it. Put no secrets in it. FEEDBACK_RELAY=off sends nothing. There is no telemetry."
   ],
-  "recipes": [
-    {
-      "command": "ahub chat --agent helper --message \"$(cat prompt.txt)\" | jq -r .content",
-      "why": "The answer alone, for a pipeline."
-    },
-    {
-      "command": "ahub thread list --agent helper --limit 5",
-      "why": "The five most recently touched conversations with one agent."
-    },
-    {
-      "command": "ahub chat --agent helper --message '...' --stream | jq -r 'select(.type==\"delta\").text' | tr -d '\\n'",
-      "why": "Watch the answer arrive while still getting a parseable stream."
-    },
-    {
-      "command": "ahub chat --agent helper --memory-project machin --message \"why does the daemon loop leak?\"",
-      "why": "One turn with recalled context, without changing the saved agent."
-    },
-    {
-      "command": "ahub chat --agent helper --skill agent-first-cli-specs --message \"audit this exit code table\"",
-      "why": "Load a procedure for one turn."
-    },
-    {
-      "command": "ahub chat ... | jq '{answer:.content, remembered:.memory.used, skills:.skills.loaded}'",
-      "why": "The answer plus exactly what informed it."
-    },
-    {
-      "command": "ahub chat --agent agent --tools memory_recall --message '...' | jq '{answer:.content, steps, tools:[.tool_runs[].name]}'",
-      "why": "The answer plus the path it took to get there."
-    },
-    {
-      "command": "ahub flow run release-notes --input repo=~/ai/agents-hub | jq '{steps, llm_calls, tokens}'",
-      "why": "Where the money went: five deterministic steps and one model call."
-    },
-    {
-      "command": "ahub flow run bkn-backup && ahub flow runs --flow bkn-backup --limit 5",
-      "why": "Run a scheduled flow by hand and read its history back out of bkn."
-    },
-    {
-      "command": "ahub schedule run nightly | jq '{status, steps, tokens, wrote:.scratchpad_written}'",
-      "why": "What one autonomous run did, and what it cost."
-    },
-    {
-      "command": "ahub config set --allow-tool-cmd 'gh pr list' && ahub chat --agent helper --tools cmd --message 'what PRs are open?'",
-      "why": "An agent reaching a real system, through a command shape you chose."
-    },
-    {
-      "command": "ahub flow run log-budget   # measure, branch, act; llm_calls: 0",
-      "why": "An ops flow with no model in it at all: measure the journal, compare against a budget, vacuum only when told to."
-    }
-  ],
-  "see_also": {
-    "help-json": "ahub help-json - the command catalog: every command, flag, and exit code",
-    "bkn": "bkn guide - the backend this tool stores everything in",
-    "memgraph": "memgraph guide - the memory and skill store ahub delegates to"
-  }
+  "see_also": [
+    "ahub help-json",
+    "ahub version",
+    "bkn guide",
+    "memgraph guide"
+  ]
 }

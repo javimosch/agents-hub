@@ -24,9 +24,9 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | Report a failure to record spend | from reading |
 | `schedule show`, `run` and others still take the schedule's name through `--agent`, a leftover that reads as an agent filter | from reading |
 | Flow and `cmd` output is capped only after it has all been captured in memory | from reading |
-| `update` runs the downloaded binary's smoke test with no timeout | from reading |
-| The passive update nudge is written but nothing calls it: wire it in or remove it | reproduced |
 | A scheduled run with only `cmd` or job tools still fails without memgraph | from reading |
+| A flag value that is not a number (`--limit abc`, `--daily-token-budget 5k`) is silently ignored; it should exit 85 | from reading |
+| Updates are not signed, and an older build counts as an update | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |
 
 ## Then: make the tests carry the promises
@@ -39,7 +39,6 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 
 ## Later: pulled by real use
 
-- cli-feedback-spec and cli-telemetry-spec.
 - A second provider implementation, when a vendor's shape demands it.
 - Prompt improvement from failed eval runs, scored against the run it came from.
 - OpenAPI import, only if allowlisted `curl` proves too little.

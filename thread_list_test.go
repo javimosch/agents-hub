@@ -32,5 +32,8 @@ func cliEnv(t *testing.T, bknURL string) []string {
 	home := t.TempDir()
 	return []string{runMainEnv + "=1", "HOME=" + home,
 		"AHUB_CONFIG=" + filepath.Join(home, "config.json"),
-		"AHUB_TOKEN=test-token", "AHUB_BKN_URL=" + bknURL}
+		"AHUB_TOKEN=test-token", "AHUB_BKN_URL=" + bknURL,
+		// A test must never reach the real update server or feedback relay.
+		"AHUB_NO_NUDGE=1", "AHUB_UPDATE_URL=http://127.0.0.1:1/ahub.json",
+		"AHUB_SERVER=http://127.0.0.1:1", "FEEDBACK_RELAY=off"}
 }

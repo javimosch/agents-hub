@@ -6,14 +6,16 @@ import (
 )
 
 func threadCmd(fl *flags) {
-	h, _ := hubFor(fl)
+	// The client is built per case, so a bad subcommand is reported as one
+	// rather than as a missing token.
+	client := func() *hub.Hub { h, _ := hubFor(fl); return h }
 	switch fl.arg(0) {
 	case "", "list", "ls":
-		threadList(h, fl)
+		threadList(client(), fl)
 	case "show", "get":
-		threadShow(h, fl)
+		threadShow(client(), fl)
 	case "rm", "delete":
-		threadDelete(h, fl)
+		threadDelete(client(), fl)
 	default:
 		out.Fail(out.InvalidArguments, "unknown_command",
 			"thread takes list, show, rm")

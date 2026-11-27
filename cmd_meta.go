@@ -29,6 +29,7 @@ func catalog() map[string]any {
 			"model":     cmd([]string{"list|set", "[model=tokens]"}, []string{"--limit <n>"}, true),
 			"job":       cmd([]string{"list|show|output|wait|stop|start|prune|reap", "[job-id]"}, []string{"--command <prefix>", "--args <a> (repeatable)", "--timeout <s>", "--bytes <n>", "--status <s>", "--limit <n>", "--older-than-days <n>", "--dry-run", "--grace <s>", "--job <id>"}, true),
 			"spend":     cmd([]string{}, []string{}, true),
+			"feedback":  cmd([]string{"[message]"}, []string{"--kind <bug|idea|praise|note>", "--context <text>", "--reporter <name>"}, false),
 			"update":    cmd([]string{}, []string{"--check", "--force"}, false),
 			"install":   cmd([]string{}, []string{"--prefix <dir>"}, false),
 			"uninstall": cmd([]string{}, []string{"--prefix <dir>"}, false),
@@ -43,6 +44,7 @@ func catalog() map[string]any {
 		"exit_codes": map[string]string{
 			"0":   "success",
 			"1":   "an eval run completed with failing assertions (only with --strict)",
+			"5":   "update --check: a different build is published",
 			"80":  "invalid arguments / unknown command",
 			"82":  "validation error (missing required field)",
 			"85":  "invalid argument value",
@@ -58,6 +60,7 @@ func catalog() map[string]any {
 			"AHUB_PROVIDER", "AHUB_PROVIDER_URL", "AHUB_PROVIDER_KEY",
 			"AHUB_MODEL", "AHUB_TIMEOUT", "AHUB_PROVIDER_TIMEOUT", "AHUB_MEMGRAPH",
 			"AHUB_SERVER", "AHUB_UPDATE_URL",
+			"AHUB_JOB_TIMEOUT", "AHUB_DAILY_TOKEN_BUDGET", "AHUB_NO_NUDGE", "FEEDBACK_RELAY",
 		},
 		"see_also": map[string]string{
 			"guide":  "ahub guide - the mental model: what to run in what order, and why",

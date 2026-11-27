@@ -357,10 +357,11 @@ stdout is data, stderr is context, and the exit code says what to do next:
 | Code | Meaning | What an agent should do |
 |---|---|---|
 | 0 | success | continue |
+| 5 | `update --check` only: a different build is published | `ahub update` |
 | 80 / 82 / 85 | unknown command / missing field / bad value | fix the command |
 | 90 | not authenticated | `ahub login` |
 | 92 | no such agent, thread or record | check the name |
-| 100 | bkn unreachable | retry with backoff |
+| 100 | bkn unreachable, or an update that could not be downloaded or verified | retry with backoff |
 | 105 | provider failed, or the turn was interrupted | retry the same `--thread` |
 | 110 | internal error | report it |
 
@@ -375,7 +376,7 @@ by the usual envelope, so a stream stays parseable line by line.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-366 assertions against a throwaway bkn, a real HTTP provider that echoes its
+369 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
@@ -385,14 +386,40 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 
 ## Spec conformance
 
+[Agent-first CLI specs](https://cli-specs.intrane.fr/):
+
 | Spec | State |
 |---|---|
-| cli-output-spec | conforms — stream separation, exit codes, typed errors, `help-json` |
-| cli-guide-spec | conforms — embedded `guide`, `--human` renders markdown |
-| cli-update-spec | partial — `install`/`uninstall` (§6), content-hash `update`, verify-then-swap. The passive nudge is not wired in yet |
-| cli-feedback-spec | not yet |
-| cli-telemetry-spec | not yet |
-| cli-daemon-spec | not applicable yet — no long-lived server |
+| cli-output-spec | adopted. `--help` never runs a command, and an unknown flag is refused. `--json`, `--no-interactive` and `--yes` are accepted: output is always JSON and nothing prompts |
+| cli-guide-spec | adopted. `guide`, `--human` |
+| cli-update-spec 1.1 | adopted. `update [--check] [--force]`, notice, [install.sh](install.sh), `install`/`uninstall`. The version is re-hashed, so no `VERSION` file is kept |
+| cli-feedback-spec | adopted, relay only |
+| cli-telemetry-spec | **not adopted, on purpose.** `ahub` holds credentials, and sends no usage data |
+| cli-daemon-spec, cli-trial-spec | not applicable: no server, no hosted service |
+
+Where `ahub` differs: `--stream` prints one JSON object per line rather than one
+per call, and `feedback` sends the reporter `agent` instead of your OS username
+unless you pass `--reporter`.
+
+The live suite runs
+[cli-spec-conformance](https://github.com/javimosch/cli-spec-conformance) for the
+output and guide specs when it is installed (`CONFORMANCE_BIN`). It does not
+cover the update or feedback specs; the unit tests do.
+
+## What leaves your machine
+
+Besides your bkn, your model provider and whatever you allow flows and tools to
+reach:
+
+- **Update check.** A release build asks the update server at most once a day,
+  on commands that talk to bkn, whether a different build is published. It sends
+  no data beyond the request itself. `AHUB_NO_NUDGE=1` or `CI` turns it off, and
+  a build from source never checks.
+- **`ahub update`** and **`install.sh`**, when you run them.
+- **`ahub feedback "<message>" [--kind bug] [--context ...]`**, only when you run
+  it: your message, kind, context and the tool's version, to
+  `https://feedback.intrane.fr`. Put no secrets in it. `FEEDBACK_RELAY` points
+  it elsewhere, or `off` sends nothing.
 
 ## Jobs: work that outlives a turn
 
@@ -532,23 +559,29 @@ A machine account needs a credential that outlives its tokens: bkn's refresh
 token is good for 30 days, so a timer running at least monthly never needs the
 password again.
 
-### Publishing a build for other machines
-
-`ahub` has no infrastructure of its own — the artifact lives in a public bkn
-file namespace:
+### Installing and publishing a build
 
 ```sh
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o ahub .
-# on the bkn host, once: bkn files ns create ahub --public
-bkn files put ahub ./ahub --name ahub
-bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha256}
+sh install.sh                          # Linux x86_64; verifies, then `ahub install`
+ahub update --check                    # exit 5 when a different build is published
 ```
 
-Then a machine pointed at that bkn with `AHUB_SERVER` runs `ahub update`.
-`AHUB_UPDATE_URL` points somewhere else if you'd rather not use bkn for it.
-The built-in default server is the author's. `update` installs whatever build
-differs from yours, even an older one, and builds are not signed: the binary and
-its hash come from the same server. Only update from a server you trust.
+`ahub` has no infrastructure of its own: the artifact lives in a public bkn file
+namespace. To publish:
+
+```sh
+scripts/publish.sh /tmp/ahub-release   # from a clean tree; builds, checks, uploads nothing
+# once, on the bkn host: bkn files ns create ahub --public
+```
+
+The script prints the upload commands. **Delete before putting:** an overwrite
+leaves the old bytes on the server's disk.
+
+`AHUB_SERVER` points at another bkn, and `AHUB_UPDATE_URL` at another version
+document. The built-in default server is the author's. `update` installs whatever
+build differs from yours, even an older one, and builds are not signed: the
+binary and its hash come from the same server. Only update from a server you
+trust.
 
 ## Limits
 

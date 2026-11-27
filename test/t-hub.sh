@@ -994,7 +994,7 @@ chk "an up-to-date binary does nothing" "False" "$("$PREFIX/ahub" update | j upd
 
 # A tampered artifact must be refused by hash, and the running binary left alone.
 printf 'not a binary' > "$PUB/ahub"
-chk "a mismatched artifact is refused" "110"    "$("$PREFIX/ahub" update --force >/dev/null 2>"$WORK/err"; echo $?)"
+chk "a mismatched artifact is refused" "100"    "$("$PREFIX/ahub" update --force >/dev/null 2>"$WORK/err"; echo $?)"
 chk "and is typed"                    "verify_failed" "$(err_type)"
 chk "the installed binary still works" "True"   "$("$PREFIX/ahub" version | j ok)"
 
@@ -1010,7 +1010,7 @@ digest = hashlib.sha256((d / "ahub").read_bytes()).hexdigest()
 (d / "ahub.json").write_text(json.dumps({
     "ok": True, "version": digest[:12], "download": "/ahub", "sha256": digest}))
 PYPUB
-chk "a broken publish fails its smoke test" "110" "$("$PREFIX/ahub" update >/dev/null 2>"$WORK/err"; echo $?)"
+chk "a broken publish fails its smoke test" "100" "$("$PREFIX/ahub" update >/dev/null 2>"$WORK/err"; echo $?)"
 chk "and is typed"                    "smoke_test_failed" "$(err_type)"
 chk "the installed binary survives"   "True"   "$("$PREFIX/ahub" version | j ok)"
 
@@ -1055,6 +1055,17 @@ chk "bkn down exits 100"              "100"     "$(code agent list)"
 chk "bkn down is typed"               "connection_error" "$(err_type)"
 chk "bkn down is recoverable"         "True"    "$(errj error.recoverable)"
 BKN_PID=""
+
+# --- spec conformance --------------------------------------------------------
+CONFORMANCE="${CONFORMANCE_BIN:-$HOME/ai/cli-spec-conformance/cli-spec-conformance}"
+if [ -x "$CONFORMANCE" ]; then
+  chk "cli-output-spec and cli-guide-spec conform" "0" \
+    "$(DO_NOT_TRACK=1 "$CONFORMANCE" check "$AHUB" --specs output,guide >/dev/null 2>&1; echo $?)"
+else
+  echo "  skip spec conformance: no checker at $CONFORMANCE"
+fi
+chk "help runs nothing, even unauthenticated" "0" "$(AHUB_TOKEN= AHUB_CONFIG="$WORK/none.json" code update --help)"
+chk "an unknown flag is exit 80"      "80"      "$(code tool list --nope)"
 
 echo
 echo "[$PASS passed, $FAIL failed]"

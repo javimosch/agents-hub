@@ -13,6 +13,8 @@
 package update
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/javimosch/agents-hub/internal/proc"
 )
 
 var (
@@ -159,6 +163,11 @@ func Apply(force bool, log func(string, ...any)) (Result, error) {
 	// same reason it is in every other tool here -- you cannot truncate-write
 	// the inode you are currently executing (ETXTBSY), but you can move the
 	// directory entry out from under it.
+	release, err := lock(self)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
 	staged := self + ".new"
 	log("[update] downloading %s", rel.Version)
 	if err := download(rel, staged); err != nil {
@@ -223,12 +232,30 @@ func download(rel Release, dest string) error {
 	return err
 }
 
-// smokeTest runs the staged binary's cheapest command.
+// smokeTimeout bounds the staged binary's check.
+var smokeTimeout = 10 * time.Second
+
+// smokeTest runs the staged binary's cheapest command and reads the answer: a
+// build that starts and says something else is not this tool.
 func smokeTest(path string) error {
-	cmd := exec.Command(path, "version")
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	if err := cmd.Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), smokeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
+	var stdout bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, io.Discard
+	killed, err := proc.Run(cmd)
+	if killed {
+		return fmt.Errorf("%w: no answer to `version` within %s", ErrSmokeTest, smokeTimeout)
+	}
+	if err != nil {
 		return fmt.Errorf("%w: %v", ErrSmokeTest, err)
+	}
+	var answer struct {
+		OK   bool   `json:"ok"`
+		Tool string `json:"tool"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &answer); err != nil || !answer.OK || answer.Tool != Tool {
+		return fmt.Errorf("%w: `version` did not answer as %s", ErrSmokeTest, Tool)
 	}
 	return nil
 }

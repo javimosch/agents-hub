@@ -15,10 +15,6 @@ var (
 	pipeline = regexp.MustCompile(`\|\||&&|\|`)
 )
 
-// globalFlags are accepted by every command (see parse in flags.go).
-var globalFlags = []string{"--profile", "--server", "--bkn", "--token",
-	"--provider", "--provider-url", "--model", "--human", "--stream"}
-
 // guideInvocations returns every ahub command line the guide tells an agent
 // to run: each "command" field, and each `ahub ...` span in its prose.
 func guideInvocations(node any, key string) []string {
@@ -33,8 +29,9 @@ func guideInvocations(node any, key string) []string {
 			found = append(found, guideInvocations(child, key)...)
 		}
 	case string:
-		if key == "command" {
-			return []string{v}
+		if strings.HasPrefix(v, "ahub ") {
+			// A gap or " # " starts the explanation.
+			return []string{columnGap.Split(v, 2)[0]}
 		}
 		for _, m := range codeSpan.FindAllStringSubmatch(v, -1) {
 			found = append(found, m[1])
@@ -50,7 +47,8 @@ func drift(line string, commands map[string]any, reader flagReader) []string {
 	// Quoted values may hold pipes and other commands' flags.
 	for _, segment := range pipeline.Split(quoted.ReplaceAllString(line, "Q"), -1) {
 		words := strings.Fields(segment)
-		if len(words) < 2 || words[0] != "ahub" || words[1] == "..." || strings.HasPrefix(words[1], "%") {
+		if len(words) < 2 || words[0] != "ahub" || words[1] == "..." || strings.HasPrefix(words[1], "%") ||
+			strings.HasPrefix(words[1], "<") { // a placeholder for any command
 			continue
 		}
 		name := words[1]

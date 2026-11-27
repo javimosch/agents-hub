@@ -57,5 +57,5 @@ func Nudge(warn func(string, ...any)) {
 	if err != nil || rel.Version == local {
 		return
 	}
-	warn("a newer ahub is published (%s, you have %s) - run `ahub update`", rel.Version, local)
+	warn("[update] a newer ahub is available (%s → %s). Run: ahub update", local, rel.Version)
 }

@@ -27,7 +27,7 @@ var dispatchers = map[string][2]string{
 
 // plainCommands maps a command without subcommands to its function.
 var plainCommands = map[string]string{
-	"chat": "chatCmd", "guide": "guideCmd", "install": "installCmd",
+	"chat": "chatCmd", "feedback": "feedbackCmd", "guide": "guideCmd", "install": "installCmd",
 	"login": "loginCmd", "setup": "setupCmd", "spend": "spendCmd",
 	"uninstall": "uninstallCmd", "update": "updateCmd", "whoami": "whoamiCmd",
 	"help-json": "helpJSON", "version": "",

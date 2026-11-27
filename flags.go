@@ -41,6 +41,11 @@ func parse(argv []string) *flags {
 	}
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
+		// The two short forms agents try by habit.
+		if a == "-h" || a == "-y" {
+			f.bools[map[string]string{"-h": "help", "-y": "yes"}[a]] = true
+			continue
+		}
 		if !strings.HasPrefix(a, "--") {
 			f.rest = append(f.rest, a)
 			continue
@@ -57,6 +62,10 @@ func parse(argv []string) *flags {
 			continue
 		case "stream":
 			f.stream = true
+			continue
+		case "help", "json", "no-interactive", "yes":
+			// Switches: they never consume the next token.
+			f.bools[name] = true
 			continue
 		}
 		if !hasVal {

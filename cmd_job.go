@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -199,8 +200,8 @@ func finishJob(h *hub.Hub, j hub.Job, exitCode int, err error) {
 		fields["error"] = err.Error()
 	}
 	if uerr := h.UpdateJob(j.ID, fields); uerr != nil {
-		out.Log("job %s finished but could not be recorded: %v", j.ID, uerr)
-		os.Exit(out.ExternalError)
+		out.Fail(out.ExternalError, "job_record_failed",
+			fmt.Sprintf("job %s finished but could not be recorded: %v", j.ID, uerr))
 	}
 	out.Data(map[string]any{"job": j.ID, "status": fields["status"], "exit_code": exitCode})
 }
