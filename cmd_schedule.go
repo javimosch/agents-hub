@@ -220,56 +220,66 @@ func scheduleRunOne(fl *flags) {
 	out.Data(fields)
 }
 
-// executeSchedule wires the provider, tools, memory and skills for one run.
+// executeSchedule runs one schedule and records what happened. Nothing here
+// may exit: the caller holds the lease, and an exit would leave it held with no
+// run recorded.
 func executeSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, trigger string) *hub.ScheduleRun {
-	p, err := provider.New(cfg.Provider, provider.Config{
-		BaseURL: cfg.ProviderURL, APIKey: cfg.ProviderKey, Timeout: cfg.providerTimeout(),
-	})
-	if err != nil {
-		out.Fail(out.InvalidValue, "invalid_value", err.Error())
-	}
-	opts := hub.RunScheduleOptions{Schedule: a, Provider: p, Trigger: trigger,
+	opts := hub.RunScheduleOptions{Schedule: a, Trigger: trigger,
 		Compact: compactionFor(fl, cfg, h), DailyBudget: cfg.DailyTokenBudget}
-
-	// memgraph is needed only if this agent asked for tools, skills or a
-	// memory project. An agent that asked for none must still run on a
-	// machine that has no memgraph.
-	if len(a.Tools) > 0 || len(a.Skills) > 0 || a.MemoryProject != "" {
-		mc, err := memory.New(0)
-		if err != nil {
-			if len(a.Tools) > 0 {
-				out.Fail(out.NotFound, "memgraph_missing", err.Error(),
-					"this schedule declares tools, and every tool is memgraph-backed")
-			}
-			out.Log("memory/skills: %v; running without them", err)
-		} else {
-			if a.MemoryProject != "" {
-				opts.Memory = &hub.MemoryOptions{
-					Client: mc, Project: a.MemoryProject, Limit: fl.intVal("memory-limit", 5),
-				}
-			}
-			if len(a.Skills) > 0 {
-				opts.Skills = &hub.SkillOptions{Client: mc}
-			}
-			if len(a.Tools) > 0 {
-				reg, err := hub.NewRegistry(hub.RegistryOptions{
-					Names: a.Tools, Memory: mc, Project: a.MemoryProject,
-					AllowWrites: fl.has("allow-writes"),
-					Policy:      cfg.toolPolicy(), Timeout: cfg.timeout(),
-					Hub: h,
-				})
-				if err != nil {
-					out.Fail(out.InvalidValue, "invalid_value", err.Error(), "ahub tool list")
-				}
-				opts.Registry = reg
-			}
-		}
-	}
+	opts.SetupError = setUpSchedule(h, cfg, fl, a, &opts)
 	run, err := h.RunSchedule(context.Background(), opts)
 	if err != nil {
 		fail(err, "record schedule run")
 	}
 	return run
+}
+
+// setUpSchedule wires the provider, tools, memory and skills for one run.
+func setUpSchedule(h *hub.Hub, cfg Config, fl *flags, a hub.Schedule, opts *hub.RunScheduleOptions) error {
+	p, err := provider.New(cfg.Provider, provider.Config{
+		BaseURL: cfg.ProviderURL, APIKey: cfg.ProviderKey, Timeout: cfg.providerTimeout(),
+	})
+	if err != nil {
+		return err
+	}
+	opts.Provider = p
+
+	// memgraph is needed only by the tools that use it. Memory and skills
+	// degrade without it; a schedule that asked for neither must still run on
+	// a machine that has never heard of it.
+	var mc *memory.Client
+	if len(a.Tools) > 0 || len(a.Skills) > 0 || a.MemoryProject != "" {
+		c, err := memory.New(0)
+		switch {
+		case err == nil:
+			mc = c
+		case needsMemory(a.Tools):
+			return fmt.Errorf("this schedule has memgraph-backed tools: %w", err)
+		case len(a.Skills) > 0 || a.MemoryProject != "":
+			out.Log("memory/skills: %v; running without them", err)
+		}
+	}
+	if mc != nil && a.MemoryProject != "" {
+		opts.Memory = &hub.MemoryOptions{
+			Client: mc, Project: a.MemoryProject, Limit: fl.intVal("memory-limit", 5),
+		}
+	}
+	if mc != nil && len(a.Skills) > 0 {
+		opts.Skills = &hub.SkillOptions{Client: mc}
+	}
+	if len(a.Tools) > 0 {
+		reg, err := hub.NewRegistry(hub.RegistryOptions{
+			Names: a.Tools, Memory: mc, Project: a.MemoryProject,
+			AllowWrites: fl.has("allow-writes"),
+			Policy:      cfg.toolPolicy(), Timeout: cfg.timeout(),
+			Hub: h,
+		})
+		if err != nil {
+			return err
+		}
+		opts.Registry = reg
+	}
+	return nil
 }
 
 func scheduleRuns(fl *flags) {

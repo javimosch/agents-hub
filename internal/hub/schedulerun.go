@@ -54,6 +54,9 @@ type RunScheduleOptions struct {
 	DailyBudget int
 	Now         time.Time
 	Reschedul   bool
+	// SetupError is why the caller could not build this run. It is recorded
+	// like any other failure, so a schedule that cannot start still says so.
+	SetupError error
 }
 
 // RunSchedule executes one agent and records what happened.
@@ -72,6 +75,10 @@ func (h *Hub) RunSchedule(ctx context.Context, opts RunScheduleOptions) (*Schedu
 	run := &ScheduleRun{
 		Schedule: a.Name, ScheduleID: a.ID, Trigger: opts.Trigger,
 		Started: started.Format(time.RFC3339), Status: "ok",
+	}
+
+	if opts.SetupError != nil {
+		return h.finishScheduleRun(a, run, started, opts.SetupError)
 	}
 
 	asst, err := h.ResolveAgent(a.Agent)

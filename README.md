@@ -388,7 +388,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-369 assertions against a throwaway bkn, a real HTTP provider that echoes its
+378 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one

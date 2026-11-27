@@ -957,6 +957,18 @@ chk "and is typed"                    "schedule_run_failed" "$(err_type)"
 chk "the failure is recorded"         "failed"  "$(a schedule runs --schedule broken | j runs.0.status)"
 chk "and it is still scheduled"       "True"    "$(a schedule show broken | python3 -c 'import json,sys;print(bool(json.load(sys.stdin)["schedule"]["next_run_at"]))')"
 
+# --- a schedule that cannot start --------------------------------------------
+a schedule create --name cmdonly --agent guarded --prompt hi --every 1h --tools cmd >/dev/null
+a config set --allow-tool-cmd "echo hi" --daily-token-budget 0 >/dev/null
+chk "a cmd-only schedule needs no memgraph" "ok" "$(AHUB_MEMGRAPH=/nonexistent a schedule run cmdonly | j status)"
+a schedule create --name needsmg --agent guarded --prompt hi --every 1h --tools memory_recall >/dev/null
+patch_store schedules "$(a schedule show needsmg | j schedule.id)" '{"next_run_at":"2020-01-01T00:00:00Z"}'
+chk "a schedule that cannot start fails the tick" "105" "$(AHUB_MEMGRAPH=/nonexistent code schedule tick)"
+chk "and leaves a failed run"         "1"       "$(a schedule runs --schedule needsmg --status failed | j count)"
+chk "and releases its lease"          ""        "$(a schedule show needsmg | j schedule.lease)"
+TK3="$(AHUB_MEMGRAPH=/nonexistent a schedule tick)"
+chk "and is not reported as held"     "0"       "$(printf '%s' "$TK3" | j skipped)"
+
 # --- install / update ------------------------------------------------------
 # cli-update-spec: a binary already in hand relocates itself, and updates
 # itself by content hash with a verify-then-swap.
