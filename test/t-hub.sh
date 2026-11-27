@@ -571,6 +571,16 @@ chk "and says so"                     "still_running" "$(err_type)"
 chk "it can be stopped"               "True"    "$(a job stop "$SL" | j stopped)"
 chk "and reads as stopped"            "stopped" "$(a job show "$SL" | j job.status)"
 
+# A command starts processes of its own, and stopping the job must reach them.
+alive() { pgrep -fx "sleep $1" >/dev/null && echo alive || echo gone; }
+settle() { for _ in $(seq 1 50); do [ "$(alive "$1")" = "$2" ] && break; sleep 0.1; done; alive "$1"; }
+a config set --allow-tool-cmd 'sh -c' >/dev/null
+TREE="$(a job start --command 'sh -c' --args 'sleep 6171 & wait' | j job.id)"
+chk "a job's grandchild starts"       "alive"   "$(settle 6171 alive)"
+a job stop "$TREE" >/dev/null
+chk "stopping the job takes it too"   "gone"    "$(settle 6171 gone)"
+a config set --deny-tool-cmd 'sh -c' >/dev/null
+
 # The model-facing verbs.
 tool_mode '{"tool":"job_start","args":"{\"command\":\"seq\",\"args\":[\"2\"]}"}'
 JT="$(a chat --agent helper --tools job_start --message "start it")"
@@ -744,6 +754,14 @@ a flow create --file "$WORK/slow.json" >/dev/null
 chk "a flow deadline stops it"        "105"     "$(code flow run slowflow --timeout 1)"
 chkin "naming the run's deadline"     "run's deadline passed" "$(errj error.message)"
 chkin "and a step budget names itself" "timed out after 1s" "$(code flow run slowflow --step-timeout 1 --timeout 60 >/dev/null; errj error.message)"
+a config set --allow-cmd 'sh -c' >/dev/null
+printf '%s' '{"name":"treeflow","start":"a","steps":{"a":{"type":"cmd","command":"sh","args":["-c","sleep 6172 & wait"],"var":"o","next":"b"},"b":{"type":"end"}}}' > "$WORK/tree.json"
+a flow create --file "$WORK/tree.json" >/dev/null
+T0=$(date +%s)
+chk "a timed out step with a grandchild fails" "105" "$(code flow run treeflow --step-timeout 1)"
+chk "and returns on time"             "yes"     "$([ $(($(date +%s) - T0)) -le 5 ] && echo yes || echo no)"
+chk "leaving nothing running"         "gone"    "$(settle 6172 gone)"
+a config set --deny-cmd 'sh -c' >/dev/null
 
 # --- evals -----------------------------------------------------------------
 # The measurement half. Without it every other change here is an opinion.

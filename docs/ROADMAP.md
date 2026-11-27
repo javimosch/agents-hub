@@ -11,7 +11,6 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | Item | Promise | Evidence |
 |---|---|---|
 | `cmd` prefixes allow dangerous arguments (`git log --output=<path>`), and children inherit the environment. **Needs a decision:** argument rules per command, or a sandbox | only what you allowed | reproduced: the file write. From reading: the environment |
-| Timeouts leave grandchildren running (a 2s timeout took 15s). Likely fix: kill the process group and set `cmd.WaitDelay`. Output is also capped only after capture | fails loudly | reproduced: the timeout. From reading: the output cap |
 
 ## Next: survive concurrency and crashes
 
@@ -24,8 +23,9 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | A job's PID is stored without a hostname, so stop and reap may act on the wrong machine | from reading |
 | Report a failure to record spend | from reading |
 | `cmd` silently drops extra words in `command` | from reading |
-| memgraph output over 2 MiB may block until the timeout | from reading |
 | `schedule show`, `run` and others still take the schedule's name through `--agent`, a leftover that reads as an agent filter | from reading |
+| Flow and `cmd` output is capped only after it has all been captured in memory | from reading |
+| `update` runs the downloaded binary's smoke test with no timeout | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |
 
 ## Then: make the tests carry the promises

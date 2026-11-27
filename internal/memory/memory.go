@@ -23,13 +23,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/javimosch/agents-hub/internal/proc"
 )
 
 // ErrUnavailable means the memgraph binary could not be found. It is a
@@ -206,29 +207,31 @@ func (c *Client) run(args []string) ([]byte, error) {
 	// No inherited stdin: a subprocess that can read the terminal is a
 	// subprocess that can hang a non-interactive command forever.
 	cmd.Stdin = nil
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	data, readErr := io.ReadAll(io.LimitReader(stdout, maxOutput))
-	waitErr := cmd.Wait()
-	if ctx.Err() != nil {
+	stdout, stderr := &capped{max: maxOutput}, &capped{max: maxOutput}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	killed, waitErr := proc.Run(cmd)
+	if killed || (ctx.Err() != nil && cmd.ProcessState == nil) {
 		return nil, fmt.Errorf("memgraph timed out after %s", c.Timeout)
 	}
 	if waitErr != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(string(stderr.buf))
 		if msg == "" {
 			msg = waitErr.Error()
 		}
 		return nil, fmt.Errorf("memgraph %s failed: %s", args[0], msg)
 	}
-	if readErr != nil {
-		return nil, readErr
-	}
-	return data, nil
+	return stdout.buf, nil
+}
+
+// capped keeps the first max bytes written to it and discards the rest. It
+// always accepts the whole write: a refused one would leave the child blocked
+// on a full pipe.
+type capped struct {
+	buf []byte
+	max int
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	c.buf = append(c.buf, p[:min(len(p), c.max-len(c.buf))]...)
+	return len(p), nil
 }

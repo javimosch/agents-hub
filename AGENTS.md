@@ -24,6 +24,7 @@ the test doubles, and the hygiene rules.
 | `internal/hub` | the domain: agents, threads, messages, the chat turn, the tool loop |
 | `internal/memory` | the memgraph wrapper: recall, skills, and the rules that keep it safe |
 | `internal/flow` | the deterministic engine: definition, validator, templating, steps |
+| `internal/proc` | runs a subprocess so its deadline holds for the whole process group |
 | `internal/bkn` | HTTP client for the backend; the only place that knows bkn's wire shapes |
 | `internal/provider` | the model layer: one interface, one OpenAI-compatible impl |
 | `internal/out` | cli-output-spec plumbing (a deliberate copy of bkn's) |
@@ -48,6 +49,9 @@ repo runs on.
 - **Never build a shell command from model or user text.** Everything that
   reaches a subprocess goes through `internal/memory` with explicit argv and a
   validated value; a value that could read as a flag is refused, not escaped.
+- **Run anything with a deadline through `proc.Run`.** A bare `cmd.Run` on an
+  `exec.CommandContext` kills one process, and a child holding the output pipe
+  can then outlive the timeout, or hang the call for good.
 - **A tool failure goes back to the model, a turn failure goes back to the
   agent.** The first is information the model can act on; the second is a
   stored, resumable thread plus an exit code.

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/javimosch/agents-hub/internal/proc"
 )
 
 // maxOut caps what a command or response may contribute to a run. A run
@@ -170,8 +172,8 @@ func RunCmdIn(ctx context.Context, lim Limits, command string, args []string, st
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if ctx.Err() != nil {
+	killed, err := proc.Run(cmd)
+	if killed || (ctx.Err() != nil && cmd.ProcessState == nil) {
 		// Which deadline fired matters: naming the step's budget when the
 		// flow's had already passed sends a reader to tune the wrong number.
 		return nil, deadline(parent, command, lim.timeout())
@@ -216,8 +218,8 @@ func RunCmdTo(ctx context.Context, lim Limits, command string, args []string, w 
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Stdout, cmd.Stderr = w, w
 	cmd.Stdin = nil
-	err = cmd.Run()
-	if ctx.Err() != nil {
+	killed, err := proc.Run(cmd)
+	if killed || (ctx.Err() != nil && cmd.ProcessState == nil) {
 		return 0, deadline(parent, command, lim.timeout())
 	}
 	if cmd.ProcessState != nil {
