@@ -180,10 +180,14 @@ func (h *Hub) History(threadID string, limit int) ([]Message, error) {
 	q.Set("thread_id", threadID)
 	q.Set("order_by", "seq")
 	q.Set("order", "asc")
+	var recs []bkn.Record
+	var err error
 	if limit > 0 {
 		q.Set("limit", fmt.Sprint(limit))
+		recs, err = h.C.List(RefMessages, q)
+	} else {
+		recs, err = h.listAll(RefMessages, q)
 	}
-	recs, err := h.C.List(RefMessages, q)
 	if err != nil {
 		return nil, err
 	}

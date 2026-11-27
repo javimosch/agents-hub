@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/javimosch/agents-hub/internal/memory"
 	"github.com/javimosch/agents-hub/internal/provider"
@@ -135,6 +134,15 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		}
 	}
 
+	// Every provider call below adds to spent, and the deferred write records
+	// it however the turn ends. The turns that hit a step cap or fail partway
+	// are the expensive ones a budget exists to count.
+	spent := 0
+	if opts.DailyBudget > 0 {
+		// Bookkeeping must not turn an answered question into a failure.
+		defer func() { _ = h.RecordSpend(spent) }()
+	}
+
 	th := opts.Thread
 	if th == nil {
 		created, err := h.CreateThread(opts.Agent, titleFrom(opts.Message))
@@ -157,6 +165,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 			// housekeeping failed would be the wrong trade.
 			rep.Error = err.Error()
 		}
+		spent += rep.Tokens
 		compaction = rep
 	}
 
@@ -165,38 +174,15 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		return nil, err
 	}
 
-	msgs := make([]provider.Message, 0, len(history)+3)
-	if opts.Agent.System != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
-	}
-	// The summary sits with the other system context: it is what the model
-	// knows about this conversation, not something the user said.
-	if th.Summary != "" {
-		msgs = append(msgs, provider.Message{
-			Role:    provider.RoleSystem,
-			Content: "## Earlier in this conversation\n\n" + th.Summary,
-		})
-	}
 	block, err := recallFor(opts)
 	if err != nil {
 		return nil, err
-	}
-	// The memory block sits after the agent's own instructions and before
-	// the conversation: the prompt still outranks it, and it is not mistaken
-	// for something the user said.
-	if block != nil && block.Text != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: block.Text})
 	}
 	skills, skillText, err := loadSkills(opts)
 	if err != nil {
 		return nil, err
 	}
-	if skillText != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: skillText})
-	}
-	for _, m := range history {
-		msgs = append(msgs, toProvider(m))
-	}
+	msgs := buildPrompt(opts.Agent, th, block, skillText, history)
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: opts.Message})
 
 	seq := nextSeq(history)
@@ -254,9 +240,10 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 			}
 			th.LastPrompt = ce.Used
 			rep, cerr := h.Compact(ctx, p, th, opts.Agent, *opts.Compact, "the provider refused the prompt: "+ce.Error())
+			spent += rep.Tokens
 			if cerr == nil && rep.Compacted {
 				compaction = rep
-				rebuilt, herr := h.rebuild(opts, th, block, skillText, specs)
+				rebuilt, herr := h.rebuild(opts, th, block, skillText)
 				if herr != nil {
 					return nil, herr
 				}
@@ -283,6 +270,7 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 		if resp.Usage.PromptTokens > 0 {
 			th.LastPrompt = resp.Usage.PromptTokens
 		}
+		spent += resp.Usage.TotalTokens
 		turn.Steps = step
 		model := resp.Model
 		if model == "" {
@@ -325,26 +313,25 @@ func (h *Hub) Chat(ctx context.Context, p provider.Provider, opts ChatOptions) (
 
 		if len(resp.ToolCalls) == 0 {
 			turn.Reply = asstMsg
-			if opts.DailyBudget > 0 {
-				// Recorded after the turn, whatever it cost: a budget that
-				// only counted cheap turns would let an expensive one through
-				// every day.
-				if err := h.RecordSpend(turn.Usage.TotalTokens); err != nil {
-					return turn, nil
-				}
-			}
 			return turn, nil
 		}
 		if opts.Tools == nil {
 			// The model asked for a tool that was never offered. Stopping is
 			// the honest move: presenting this as an answer would hide that
 			// it is a request nobody answered.
+			if err := h.answerUnrun(th, next, resp.ToolCalls, "no tools are enabled"); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("model requested tools but none are enabled")
 		}
 		if step >= maxSteps {
 			// The cap is a budget, so hitting it is reported rather than
 			// smoothed over: finish_reason says max_steps and the last
 			// agent turn is whatever the model had produced.
+			if err := h.answerUnrun(th, next, resp.ToolCalls, "the step limit was reached"); err != nil {
+				return nil, err
+			}
+			turn.Thread = *th
 			turn.Reply = asstMsg
 			turn.Finish = "max_steps"
 			return turn, nil
@@ -419,164 +406,6 @@ func (h *Hub) oneShot(ctx context.Context, p provider.Provider, opts ChatOptions
 	}, nil
 }
 
-// runTool executes one call. A tool failure is returned to the model as the
-// tool's result rather than raised: the model asked a question, "that did not
-// work, here is why" is an answer it can act on, and killing the turn throws
-// away everything the earlier steps established.
-func (h *Hub) runTool(ctx context.Context, reg *Registry, step int, call provider.ToolCall) (string, ToolRun) {
-	run := ToolRun{Step: step, Name: call.Name, Args: call.Arguments}
-	t, ok := reg.get(call.Name)
-	if !ok {
-		// Naming the alternatives is what lets a model correct itself. Told
-		// only "no such tool", a real one invented the same wrong name three
-		// times and burned the whole step budget doing it.
-		run.Failed = "no such tool"
-		return fmt.Sprintf("Error: no tool named %q. Available tools: %s.",
-			call.Name, strings.Join(reg.Names(), ", ")), run
-	}
-	args := json.RawMessage(call.Arguments)
-	if len(args) == 0 {
-		args = json.RawMessage("{}")
-	}
-	if !json.Valid(args) {
-		run.Failed = "arguments were not valid JSON"
-		return "Error: your arguments were not valid JSON. Send a JSON object.", run
-	}
-	// Checked here rather than left to the tool, so the model is told which
-	// parameter it missed instead of receiving whatever error the tool
-	// happens to produce when handed an empty string.
-	if missing := missingArgs(t, args); missing != "" {
-		run.Failed = "missing required parameter " + missing
-		return fmt.Sprintf("Error: tool %q requires the parameter %q. Send it and try again.",
-			call.Name, missing), run
-	}
-	result, err := t.Run(ctx, args)
-	if err != nil {
-		run.Failed = err.Error()
-		return "Error: " + err.Error(), run
-	}
-	run.Chars = len(result)
-	return result, run
-}
-
-// missingArgs reports the first required parameter the model left out.
-func missingArgs(t Tool, args json.RawMessage) string {
-	var got map[string]any
-	if err := json.Unmarshal(args, &got); err != nil {
-		return ""
-	}
-	for _, name := range t.Required() {
-		v, present := got[name]
-		if !present {
-			return name
-		}
-		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
-			return name
-		}
-	}
-	return ""
-}
-
-// toProvider rebuilds a stored message for replay, including the tool call
-// linkage. A dropped tool_calls array makes the next tool result an orphan
-// and the whole conversation unreplayable.
-func toProvider(m Message) provider.Message {
-	out := provider.Message{
-		Role: m.Role, Content: m.Content,
-		ToolCallID: m.ToolCallID, Name: m.Name,
-	}
-	if m.ToolCalls != "" {
-		var calls []provider.ToolCall
-		if err := json.Unmarshal([]byte(m.ToolCalls), &calls); err == nil {
-			out.ToolCalls = calls
-		}
-	}
-	return out
-}
-
-// loadSkills resolves each named skill through memgraph and reads its file.
-func loadSkills(opts ChatOptions) (*SkillReport, string, error) {
-	so := opts.Skills
-	names := append([]string{}, opts.Agent.Skills...)
-	if so != nil {
-		names = append(names, so.Names...)
-	}
-	names = dedupe(names)
-	if len(names) == 0 || so == nil || so.Client == nil {
-		return nil, "", nil
-	}
-	rep := &SkillReport{}
-	loaded := map[string]string{}
-	order := make([]string, 0, len(names))
-	for _, name := range names {
-		sk, err := so.Client.FindSkill(name, 10)
-		if err == nil {
-			var body string
-			body, err = memory.LoadSkill(sk)
-			if err == nil {
-				loaded[name] = body
-				order = append(order, name)
-				rep.Loaded = append(rep.Loaded, name)
-				continue
-			}
-		}
-		if so.Required {
-			return nil, "", fmt.Errorf("skill %q: %w", name, err)
-		}
-		if rep.Skipped == nil {
-			rep.Skipped = map[string]string{}
-		}
-		rep.Skipped[name] = err.Error()
-	}
-	text := memory.SkillBlock(loaded, order)
-	rep.Chars = len(text)
-	return rep, text, nil
-}
-
-// dedupe keeps the first occurrence of each name. An agent configured
-// with a skill and then asked for it again on the command line should not
-// pay for it twice.
-func dedupe(in []string) []string {
-	seen := map[string]bool{}
-	out := in[:0]
-	for _, s := range in {
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	return out
-}
-
-// recallFor runs the pre-turn recall, if one was asked for.
-//
-// A recall failure is reported on the turn rather than raised, unless the
-// caller said the memory was required. Losing context degrades an answer;
-// refusing to answer at all because a side lookup failed is worse than the
-// answer would have been.
-func recallFor(opts ChatOptions) (*memory.Block, error) {
-	m := opts.Memory
-	if m == nil || m.Client == nil {
-		return nil, nil
-	}
-	q := m.Query
-	if q == "" {
-		q = opts.Message
-	}
-	res, err := m.Client.Recall(memory.Query{
-		Text: q, Project: m.Project, Limit: m.Limit, Format: "index",
-	})
-	if err != nil {
-		if m.Required {
-			return nil, fmt.Errorf("memory recall failed: %w", err)
-		}
-		return &memory.Block{Project: m.Project, Error: err.Error()}, nil
-	}
-	b := memory.Context(res, m.Project, m.Budget)
-	return &b, nil
-}
-
 // touch records how many messages the thread now holds and when it last moved.
 func (h *Hub) touch(th *Thread, count int) error {
 	th.Messages = count
@@ -589,32 +418,6 @@ func (h *Hub) touch(th *Thread, count int) error {
 	}
 	_, err := h.C.Patch(RefThreads, th.ID, fields)
 	return err
-}
-
-// rebuild reassembles the prompt after a compaction mid-turn.
-func (h *Hub) rebuild(opts ChatOptions, th *Thread, block *memory.Block, skillText string, specs []provider.Tool) ([]provider.Message, error) {
-	history, err := h.HistoryAfter(th.ID, th.SummarySeq, opts.HistoryLimit)
-	if err != nil {
-		return nil, err
-	}
-	msgs := make([]provider.Message, 0, len(history)+4)
-	if opts.Agent.System != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: opts.Agent.System})
-	}
-	if th.Summary != "" {
-		msgs = append(msgs, provider.Message{
-			Role: provider.RoleSystem, Content: "## Earlier in this conversation\n\n" + th.Summary})
-	}
-	if block != nil && block.Text != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: block.Text})
-	}
-	if skillText != "" {
-		msgs = append(msgs, provider.Message{Role: provider.RoleSystem, Content: skillText})
-	}
-	for _, m := range history {
-		msgs = append(msgs, toProvider(m))
-	}
-	return msgs, nil
 }
 
 // nextSeq continues the thread's numbering. It reads the last stored seq

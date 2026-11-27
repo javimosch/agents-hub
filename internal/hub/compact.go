@@ -172,6 +172,8 @@ func (h *Hub) Compact(ctx context.Context, p provider.Provider, th *Thread, a Ag
 		summaryCap /= 2
 		rep.Partial = true
 	}
+	// Set before the summary is judged: an unusable one was still paid for.
+	rep.Tokens = turn.Usage.TotalTokens
 	summary := strings.TrimSpace(turn.Reply.Content)
 	if summary == "" {
 		rep.Error = "the summariser returned nothing; leaving the thread alone"
@@ -196,6 +198,5 @@ func (h *Hub) Compact(ctx context.Context, p provider.Provider, th *Thread, a Ag
 	rep.Compacted = true
 	rep.FoldedUpTo = last
 	rep.Messages = len(fold)
-	rep.Tokens = turn.Usage.TotalTokens
 	return rep, nil
 }

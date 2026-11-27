@@ -215,10 +215,14 @@ func (h *Hub) ListSchedules(limit int) ([]Schedule, error) {
 	q := url.Values{}
 	q.Set("order_by", "name")
 	q.Set("order", "asc")
+	var recs []bkn.Record
+	var err error
 	if limit > 0 {
 		q.Set("limit", fmt.Sprint(limit))
+		recs, err = h.C.List(RefSchedules, q)
+	} else {
+		recs, err = h.listAll(RefSchedules, q)
 	}
-	recs, err := h.C.List(RefSchedules, q)
 	if err != nil {
 		return nil, err
 	}

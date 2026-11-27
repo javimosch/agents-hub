@@ -4,7 +4,7 @@ import "strings"
 import "testing"
 
 func TestTruncatedJSONSaysSo(t *testing.T) {
-	o := &Output{Text: strings.Repeat("x", 10) , Truncated: true}
+	o := &Output{Text: strings.Repeat("x", 10), Truncated: true}
 	err := ParseOutput(o, "json")
 	if err == nil || !strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("want a truncation explanation, got %v", err)

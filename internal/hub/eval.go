@@ -250,7 +250,8 @@ func (h *Hub) judgeFor(ctx context.Context, opts EvalOptions, run *EvalRun) eval
 		// after, so a truncated or rambling reply still parses.
 		prompt := "Answer with PASS or FAIL on the first line, then one short sentence of reasoning.\n\n" +
 			"Question: " + question + "\n\nAnswer under test:\n" + answer
-		turn, err := h.Chat(ctx, opts.Provider, ChatOptions{Agent: j, Message: prompt})
+		turn, err := h.Chat(ctx, opts.Provider, ChatOptions{
+			Agent: j, Message: prompt, DailyBudget: opts.DailyBudget})
 		if err != nil {
 			return false, "", 0, err
 		}
