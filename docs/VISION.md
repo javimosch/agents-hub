@@ -7,8 +7,7 @@ durably in [bkn](https://github.com/javimosch/bkn). The caller is usually anothe
 agent, a script or a timer, so everything is built for a caller that reads JSON,
 branches on exit codes and is not there to answer a prompt.
 
-It is a CLI-only port of the agent layer of `the internal project`: the agentic spine,
-without the UI, the widget, MongoDB or the vector store.
+It is the agentic spine alone: no UI, no widget, no vector store.
 
 ## What we believe
 
@@ -30,7 +29,7 @@ without the UI, the widget, MongoDB or the vector store.
 
 | Not building | Why |
 |---|---|
-| A chat UI or embeddable widget | `the internal project` is that |
+| A chat UI or embeddable widget | the caller is a command line |
 | RAG or an embedding pipeline | memgraph memories and skills replace it |
 | An MCP gateway | a CLI is the better integration surface |
 | Sub-agents, `loop` or `subflow` steps | the caller already loops, branches and composes |

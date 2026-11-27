@@ -102,11 +102,3 @@ The hook cannot tell whether a test came first. That part is on you.
 
 `go test -cover ./...` finds untested code. It is a map, not a target: a line
 executed without an assertion is not tested.
-
-## Origin
-
-Adapted from `the internal project`'s testing skills (`unit-testing-best-practices`,
-`unit-functional-e2e-tests`, `the internal project-tests-knowledge`) and its
-`.githooks`: layered tests, targeted inner loop with a full confirm, isolation,
-mock-fidelity traps and a commit gate. Their Jest, MongoDB and Vue specifics
-were left behind. The red-first rule is ahub's own.

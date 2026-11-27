@@ -12,9 +12,7 @@ import (
 // Config is everything ahub needs to reach its two dependencies: a bkn
 // instance for state and identity, and a model provider for answers.
 //
-// Resolution order is flags > env > profile > default, and it is deliberately
-// the same order another CLI uses -- an agent that has learned one of these tools
-// should not have to relearn where the token comes from.
+// Resolution order is flags > env > profile > default.
 type Config struct {
 	BknURL      string `json:"bkn_url,omitempty"`
 	Token       string `json:"token,omitempty"`

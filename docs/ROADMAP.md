@@ -26,6 +26,8 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | `schedule show`, `run` and others still take the schedule's name through `--agent`, a leftover that reads as an agent filter | from reading |
 | Flow and `cmd` output is capped only after it has all been captured in memory | from reading |
 | `update` runs the downloaded binary's smoke test with no timeout | from reading |
+| The passive update nudge is written but nothing calls it: wire it in or remove it | reproduced |
+| A scheduled run with only `cmd` or job tools still fails without memgraph | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |
 
 ## Then: make the tests carry the promises

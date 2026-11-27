@@ -5,7 +5,7 @@
     "where_state_lives": "In a bkn instance, in three owner-scoped collections (hub/agents, hub/threads, hub/messages). ahub keeps only a profile on disk: a bkn URL, your token, and a provider key.",
     "what_it_is_not": "Not a chat UI and not a daemon. No RAG: context comes from memgraph memories and skills, which are written on purpose and readable as text. No sub-agents, HITL or workflows yet.",
     "context": "Two optional blocks are prepended as system messages before a turn: recalled memories (reference material, from a memgraph project) and skills (procedures, named explicitly). Both are reported on the answer, so a turn given without them never looks like one given with them.",
-    "tools": "An agent may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per agent or per call, every one is backed by memgraph, and anything that writes needs --allow-writes as well.",
+    "tools": "An agent may be given tools, and then a turn becomes a loop: the model asks for a tool, the result goes back to it, and it answers. Tools are opt-in per agent or per call, the memory and skill tools need memgraph while cmd and the job tools need an allowlist, and anything that writes needs --allow-writes as well.",
     "flows": "A flow is a path expressed as data: steps, a start, and where each goes next. Most step types cost nothing -- collect a value, branch on it, run an allowlisted CLI, call an allowlisted host -- and exactly one (ask) calls a model. A run pauses when it needs input and is resumed by id, so a wizard works in a tool that must never prompt.",
     "agents": "An agent is a saved configuration: a system prompt, a model, and optionally a memory project, skills and tools. It is the noun this tool is named after. `ahub chat --agent <name>` talks to one; a flow's ask step calls one; a schedule runs one unattended.",
     "schedules": "A schedule is a standing instruction: run this agent, on this cadence, with nobody watching. Each run starts a FRESH thread and carries forward one bounded note -- the scratchpad -- that the agent writes itself. Replaying history would make every run cost more than the last and eventually stop fitting; a note cannot.",
@@ -183,7 +183,7 @@
     },
     {
       "name": "agent vs schedule",
-      "what": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences. \"Assistant\" is the internal project's word for the same thing and is not used here."
+      "what": "The agent is the configuration; the schedule is the standing instruction that runs it. One agent can carry several schedules with different prompts and cadences."
     },
     {
       "name": "assertions",

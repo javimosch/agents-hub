@@ -34,7 +34,7 @@ it is believed after being run against a real model.
 | Schedules | 🟡 | scratchpad and lease; the lease has suspected races |
 | Evals | ✅ | run and compare |
 | Compaction | 🟡 | its kept boundary can split a tool exchange |
-| Install and self-update | ✅ | content hash, verified before swapping |
+| Install and self-update | 🟡 | content hash, verified before swapping; unsigned, can downgrade |
 | cli-output-spec, cli-guide-spec | 🟡 | commands and flags in `help-json`, the guide, the README and error suggestions are tested against the code; wording is not |
 | cli-feedback-spec, cli-telemetry-spec | ❌ | not started |
 

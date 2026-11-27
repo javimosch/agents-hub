@@ -5,15 +5,18 @@
 `ahub` — run a configured agent from the command line, non-interactively,
 with the conversation stored durably in [bkn](https://github.com/javimosch/bkn).
 
-A CLI-only, agent-first port of the agent layer of `the internal project`. No UI,
-no widget, no MongoDB: state and identity live in a bkn instance, answers come
-from any OpenAI-compatible provider, context comes from
+An agent-first CLI. No UI, no widget, no database of its own: state and
+identity live in a bkn instance, answers come from any OpenAI-compatible
+provider, context comes from
 [memgraph](https://github.com/javimosch/memgraph) memories and skills, and
 everything this binary prints follows
 [cli-output-spec](https://cli-specs.intrane.fr/).
 
+> **Early project, with known safety gaps.** Read [Limits](#limits) before
+> giving an agent the `cmd` or job tools.
+
 ```sh
-go build -o bin/ahub . && ./bin/ahub install     # or: curl the published binary
+go build -o bin/ahub . && ./bin/ahub install     # build from source
 ahub update --check                              # content-hash versioning
 
 ahub setup --admin-token "$BKN_ADMIN_TOKEN"        # once, by a human
@@ -122,6 +125,9 @@ ahub chat --agent agent --tools memory_recall,skill_show \
 | `skill_show` — read one procedure in full | no | memgraph |
 | `memory_save` — record a durable note | **yes** | memgraph |
 | `cmd` — run a permitted command | — | an allowlist |
+| `job_start` — start a permitted command in the background | — | an allowlist |
+| `job_wait` — wait for a job it started | — | an allowlist |
+| `job_output` — read a job's output | — | an allowlist |
 
 ### Reaching the world: the `cmd` tool
 
@@ -139,13 +145,18 @@ change the prefix. Allowing `git log` does not allow `git push --force`, and
 `git logger` is not a match either — comparison is on whole fields. The list is
 empty by default, so the tool does not exist until someone permits something.
 
+**A prefix does not make a command safe.** It limits how a command starts, not
+what its arguments can do: with `git log` allowed, `git log --output=<path>`
+writes a file. The command also inherits `ahub`'s environment. The job tools
+use the same list and have the same gap.
+
 It is deliberately **not** behind `--allow-writes`: the prefix list is a
 stronger and more specific gate, and a flag you must pass even to run `git log`
 would only teach people the flag means nothing.
 
-Every tool is memgraph-backed, which is deliberate: the first tools an
-agent gets are the ones that let it *look things up*, not the ones that
-let it act. There is no shell tool, and that is not an oversight.
+The memory and skill tools need memgraph; `cmd` and the job tools do not.
+There is no built-in shell tool. Permitting a prefix such as `sh -c` would
+create one, so don't.
 
 Writes are gated twice — naming a tool enables it, and a tool that changes
 state needs `--allow-writes` as well. "Give it tools" and "let it change
@@ -360,7 +371,7 @@ so replaying a thread that contains tool turns is tested rather than hoped for.
 |---|---|
 | cli-output-spec | conforms — stream separation, exit codes, typed errors, `help-json` |
 | cli-guide-spec | conforms — embedded `guide`, `--human` renders markdown |
-| cli-update-spec | conforms — `install`/`uninstall` (§6), content-hash `update`, verify-then-swap, passive nudge |
+| cli-update-spec | partial — `install`/`uninstall` (§6), content-hash `update`, verify-then-swap. The passive nudge is not wired in yet |
 | cli-feedback-spec | not yet |
 | cli-telemetry-spec | not yet |
 | cli-daemon-spec | not applicable yet — no long-lived server |
@@ -515,8 +526,22 @@ bkn files put ahub ./ahub --name ahub
 bkn files put ahub ./ahub.json --name ahub.json   # {ok, version, download, sha256}
 ```
 
-Then any machine runs `ahub update`. `AHUB_UPDATE_URL` points somewhere else
-if you'd rather not use bkn for it.
+Then a machine pointed at that bkn with `AHUB_SERVER` runs `ahub update`.
+`AHUB_UPDATE_URL` points somewhere else if you'd rather not use bkn for it.
+The built-in default server is the author's. `update` installs whatever build
+differs from yours, even an older one, and builds are not signed: the binary and
+its hash come from the same server. Only update from a server you trust.
+
+## Limits
+
+- **`cmd` and job tools:** an allowed prefix does not restrict arguments, and
+  child processes inherit the environment.
+- **Updates:** unsigned, and not checked for being newer (see above).
+- **Concurrency and crashes:** some cases are suspected from reading the code
+  and not yet resolved. See the [roadmap](docs/ROADMAP.md).
+- **Platforms:** developed and tested on Linux. macOS builds compile but are
+  untested. Windows does not build.
+- **Tests:** many parts have no unit tests yet.
 
 ## What v0.13 is not
 
@@ -529,15 +554,10 @@ something needs it: the caller here is usually an agent, and an agent already
 has a loop, branching and composition. `ahub flow run a && ahub flow run b`
 is subflow. HITL is `collect_input`, which pauses and exits 92 with the resume
 command — when the caller is an agent, "human in the loop" is "caller in the
-loop". Nor is
-there prompt-improvement: the internal project's eval-analysis can propose and apply
-a better prompt from failed runs, and that only becomes worth building now that
-a proposal can be scored against the run it came from. bkn already has `cron` and `hooks`, so triggering a flow on a
-schedule or a webhook is wiring, not engine work.
-
-What remains of
-`the internal project`'s agentic engine and they are not here yet — this is the
-spine they attach to.
+loop". Nor is there prompt improvement from failed eval runs, which only becomes
+worth building now that a proposal can be scored against the run it came from.
+bkn already has `cron` and `hooks`, so triggering a flow on a schedule or a
+webhook is wiring, not engine work.
 
 RAG is not on the list: memory and skills replace it deliberately. A note
 somebody wrote on purpose, retrievable by name and readable as text, beats a

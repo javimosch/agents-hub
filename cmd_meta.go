@@ -57,7 +57,7 @@ func catalog() map[string]any {
 			"AHUB_BKN_URL", "AHUB_TOKEN", "AHUB_PROFILE", "AHUB_CONFIG",
 			"AHUB_PROVIDER", "AHUB_PROVIDER_URL", "AHUB_PROVIDER_KEY",
 			"AHUB_MODEL", "AHUB_TIMEOUT", "AHUB_PROVIDER_TIMEOUT", "AHUB_MEMGRAPH",
-			"AHUB_SERVER", "AHUB_UPDATE_URL", "AHUB_NO_NUDGE",
+			"AHUB_SERVER", "AHUB_UPDATE_URL",
 		},
 		"see_also": map[string]string{
 			"guide":  "ahub guide - the mental model: what to run in what order, and why",

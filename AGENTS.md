@@ -5,8 +5,8 @@ the product's own mental model and it ships inside the binary.
 
 ## What this is
 
-`ahub`, a Go CLI. A CLI-only port of the agent layer of `an internal project`,
-storing everything in a bkn instance. Zero third-party dependencies — standard
+`ahub`, a Go CLI that runs configured agents non-interactively, storing
+everything in a bkn instance. Zero third-party dependencies — standard
 library only, like bkn. Keep it that way unless there is a reason that survives
 the question "what would this cost us at deploy time?".
 
