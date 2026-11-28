@@ -11,8 +11,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AHUB="$ROOT/bin/ahub"
 BKN="${BKN_BIN:-$HOME/ai/bkn/bin/bkn}"
 WORK="$(mktemp -d)"
-BKN_PORT="${BKN_PORT:-$((20000 + RANDOM % 20000))}"
-PROV_PORT="${PROV_PORT:-$((20000 + RANDOM % 20000))}"
+# A port nothing is listening on. A random guess can land on another process,
+# which then answers the health check, and nearly every assertion fails.
+free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'; }
+BKN_PORT="${BKN_PORT:-$(free_port)}"
+PROV_PORT="${PROV_PORT:-$(free_port)}"
 PASS=0; FAIL=0
 
 cleanup() {
@@ -51,6 +54,14 @@ B="http://127.0.0.1:$BKN_PORT"
 P="http://127.0.0.1:$PROV_PORT"
 for _ in $(seq 1 50); do curl -sf "$B/_health" >/dev/null && break; sleep 0.1; done
 for _ in $(seq 1 50); do curl -sf -X POST "$P/control/fail" -d '{"fail":false}' >/dev/null && break; sleep 0.1; done
+
+# Whatever is on the port may answer 200 (MongoDB does), so bkn has to name
+# itself and the process this suite started. The provider has no such answer;
+# it only has to be alive once bkn's check has taken its time.
+curl -s -m 2 "$B/_health" | grep -q "\"pid\":$BKN_PID," ||
+  { echo "the test bkn did not start on port $BKN_PORT" >&2; exit 1; }
+kill -0 "$PROV_PID" 2>/dev/null ||
+  { echo "the test provider did not start on port $PROV_PORT" >&2; exit 1; }
 
 export AHUB_CONFIG="$WORK/config.json"
 export AHUB_BKN_URL="$B"
