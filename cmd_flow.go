@@ -193,6 +193,8 @@ func flowRun(fl *flags, resumeID string) {
 		fail(err, "load flow")
 	}
 
+	readSecretInput(fl, f, inputs)
+
 	engine := &flow.Engine{
 		Flow:     f,
 		Secrets:  cfg.Secrets,
@@ -255,9 +257,13 @@ func report(r *flow.Run) {
 		// Needing input is not a failure, but it is not a finished run
 		// either, and an agent must be able to tell the two apart from the
 		// exit code alone.
+		resume := "ahub flow resume " + r.ID + " --input " + r.Needs.Var + "=<value>"
+		if r.Needs.Secret {
+			resume = "ahub flow resume " + r.ID + " --secret-input " + r.Needs.Var + "  # value on stdin"
+		}
 		out.Fail(out.NotFound, "needs_input",
 			"run "+r.ID+" needs "+r.Needs.Var+": "+r.Needs.Prompt,
-			"ahub flow resume "+r.ID+" --input "+r.Needs.Var+"=<value>",
+			resume,
 			string(b))
 	case flow.StatusFailed:
 		fields["error"] = r.Error

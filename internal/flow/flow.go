@@ -68,6 +68,8 @@ type Step struct {
 	Text     string `json:"text,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
 	Required bool   `json:"required,omitempty"`
+	// Secret marks a collect_input value that is used and never kept.
+	Secret bool `json:"secret,omitempty"`
 
 	// conditional
 	When []Branch `json:"when,omitempty"`
@@ -198,9 +200,13 @@ func Validate(f *Flow, allowedCmds, allowedHosts []string) []Problem {
 		return t
 	}
 
+	secrets := SecretVars(f)
 	for _, name := range names {
 		s := f.Steps[name]
 		validateStep(name, s, add, allowedCmds, allowedHosts)
+		if err := secretMisuse(s, secrets); err != nil {
+			add(name, err.Error(), true)
+		}
 		for _, t := range targets(s) {
 			if _, ok := f.Steps[t]; !ok {
 				add(name, "goes to "+t+", which does not exist", true)

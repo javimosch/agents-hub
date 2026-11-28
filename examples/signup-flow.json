@@ -1,0 +1,18 @@
+{
+  "name": "example-signup",
+  "description": "Collects an email and a password, and creates an account.",
+  "start": "email",
+  "steps": {
+    "email":    {"type":"collect_input","var":"email","prompt":"Email address?","required":true,"next":"check"},
+    "check":    {"type":"conditional","when":[{"var":"email","op":"contains","value":"@","next":"password"}],"else":"bad_email"},
+    "password": {"type":"collect_input","var":"password","prompt":"Choose a password","required":true,"secret":true,"next":"create"},
+    "create":   {"type":"http","method":"POST","url":"http://127.0.0.1:8765/signup",
+                 "body":"{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}",
+                 "var":"account","parse":"json","select":"id","next":"done","on_error":"refused"},
+    "done":     {"type":"message","text":"Account {{account}} created for {{email}}.","next":"ok"},
+    "ok":       {"type":"end"},
+    "bad_email":{"type":"message","text":"That is not an email address.","next":"failed"},
+    "refused":  {"type":"message","text":"Sign-up refused with status {{account_code}}.","next":"failed"},
+    "failed":   {"type":"end","status":"failed"}
+  }
+}

@@ -18,6 +18,7 @@ const (
 
 // Need is what a paused run is waiting for.
 type Need struct {
+	Secret bool   `json:"secret,omitempty"`
 	Var    string `json:"var"`
 	Prompt string `json:"prompt"`
 }
@@ -113,6 +114,9 @@ func (e *Engine) run(ctx context.Context, run *Run) {
 	if max <= 0 {
 		max = 100
 	}
+	secrets := SecretVars(e.Flow)
+	// However the run stops, what is kept of it does not hold them.
+	defer forget(run, secrets)
 	for run.Status == StatusRunning {
 		// Checked between steps rather than only inside one: a flow can be
 		// slow because of many quick steps as easily as one long one, and the
@@ -128,6 +132,16 @@ func (e *Engine) run(ctx context.Context, run *Run) {
 		step, ok := e.Flow.Steps[run.Cursor]
 		if !ok {
 			e.fail(run, "step "+run.Cursor+" does not exist")
+			return
+		}
+		if err := secretMisuse(step, secrets); err != nil {
+			e.fail(run, run.Cursor+": "+err.Error())
+			return
+		}
+		if ask, missing := e.missingSecret(run, step, secrets); missing {
+			run.Status = StatusPaused
+			run.Needs = &Need{Var: ask.Var, Prompt: ask.Prompt, Secret: true}
+			e.trace(run, run.Cursor, step.Type, "waiting for "+ask.Var+" again; secrets are not kept", 0)
 			return
 		}
 		run.Steps++
@@ -195,7 +209,7 @@ func (e *Engine) do(ctx context.Context, run *Run, name string, s Step) {
 		// run stops, says what it needs, and the caller resumes it with the
 		// value. Nothing blocks on a terminal that may not exist.
 		run.Status = StatusPaused
-		run.Needs = &Need{Var: s.Var, Prompt: prompt}
+		run.Needs = &Need{Var: s.Var, Prompt: prompt, Secret: s.Secret}
 		e.trace(run, name, s.Type, "waiting for "+s.Var, 0)
 
 	case TypeCond:
@@ -290,10 +304,13 @@ func (e *Engine) doIO(ctx context.Context, run *Run, name string, s Step, r Rend
 		// A refused command, an unreachable host or an unset variable is a
 		// step that never ran; on_error still catches it, so a flow can
 		// handle a missing integration without stopping.
-		e.trace(run, name, s.Type, r.Redact(err.Error()), 0)
-		e.after(run, name, s, r.Redact(err.Error()), -1)
+		msg := newScrubber(run, SecretVars(e.Flow)).text(r.Redact(err.Error()))
+		e.trace(run, name, s.Type, msg, 0)
+		e.after(run, name, s, msg, -1)
 		return
 	}
+	sc := newScrubber(run, SecretVars(e.Flow))
+	out.Text, out.Err = sc.text(out.Text), sc.text(out.Err)
 	if perr := ParseOutput(out, s.Parse); perr != nil {
 		e.trace(run, name, s.Type, perr.Error(), out.Code)
 		e.after(run, name, s, perr.Error(), out.Code)

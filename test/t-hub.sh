@@ -515,6 +515,32 @@ FLOW
 a flow create --file "$WORK/jsonflow.json" >/dev/null
 chk "a hostile value arrives as text"  'x","note":"changed' "$(a flow run jsonflow --input 'v=x","note":"changed' | j data.t)"
 
+# --- secret inputs ----------------------------------------------------------
+a config set --allow-cmd cat >/dev/null
+cat >"$WORK/secretflow2.json" <<'FLOW'
+{"name":"signin","start":"mail","steps":{
+ "mail":{"type":"collect_input","var":"mail","prompt":"Email?","required":true,"next":"pw"},
+ "pw":{"type":"collect_input","var":"pw","prompt":"Password?","required":true,"secret":true,"next":"use"},
+ "use":{"type":"cmd","command":"cat","stdin":"{{pw}}","var":"echoed","next":"done"},
+ "done":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/secretflow2.json" >/dev/null
+SPW='zz-planted-password'
+a flow run signin --input mail=a@b.test >/dev/null
+SRUN="$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["run"])')"
+chkin "the pause says how to give a secret" "--secret-input pw" "$(errj error.suggestions.0)"
+chk "a secret on the command line is refused" "85" "$(code flow resume "$SRUN" --input pw="$SPW")"
+chk "as secret_on_command_line"       "secret_on_command_line" "$(err_type)"
+chk "and the refusal does not repeat it" "0" "$(grep -c "$SPW" "$WORK/err")"
+chk "only a secret may come that way" "85" "$(printf x | code flow resume "$SRUN" --secret-input mail)"
+chk "an empty one is refused"         "82" "$(printf '' | code flow resume "$SRUN" --secret-input pw)"
+SOUT="$(printf '%s\n' "$SPW" | a flow resume "$SRUN" --secret-input pw)"
+chk "read from stdin, the run completes" "completed" "$(printf '%s' "$SOUT" | j status)"
+chk "its echo is redacted"            "[redacted]" "$(printf '%s' "$SOUT" | j data.echoed)"
+chk "the output does not hold it"     "0" "$(printf '%s' "$SOUT" | grep -c "$SPW")"
+chk "nor does the stored run"         "0" "$(a flow runs --run "$SRUN" | grep -c "$SPW")"
+chk "nor does bkn's database"         "0" "$(cat "$BKN_DATA"* | grep -ac "$SPW")"
+
 # --- the cmd tool -----------------------------------------------------------
 # Flows could always reach the world; agents could only look things up. This
 # closes that, but the argv author changes from a human to a model, so the

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 AHUB="${AHUB:-ahub}"
-MODEL="${AHUB_MODEL:?set AHUB_MODEL to a model that supports tool calls}"
+MODEL="${AHUB_MODEL:-}"   # new_agent needs it; a flow without ask does not
 command -v jq >/dev/null || { echo "these examples need jq" >&2; exit 1; }
 "$AHUB" whoami >/dev/null 2>&1 || { echo "log in first: ahub setup, then ahub login" >&2; exit 1; }
 
@@ -31,6 +31,7 @@ permit_cmd() {
 }
 
 new_agent() { # new_agent <name> <system prompt>
+  [ -n "$MODEL" ] || die "set AHUB_MODEL to a model that supports tool calls"
   "$AHUB" agent create --name "$1" --model "$MODEL" --system "$2" >/dev/null
   UNDO+=("$(printf '%q agent rm %q' "$AHUB" "$1")")
 }

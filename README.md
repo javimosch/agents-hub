@@ -235,6 +235,36 @@ step sets `<var>`, `<var>_code` and `<var>_err` for exactly that.
 exits 92 with the resume command; `ahub flow resume <id> --input k=v`
 continues it, from another machine or another day if you like.
 
+**A secret input is used and not kept.** Mark a step `"secret": true` for a
+password or a one-time code:
+
+```json
+"password": {"type":"collect_input","var":"password","prompt":"Choose a password",
+             "required":true,"secret":true,"next":"create"}
+```
+
+```sh
+printf '%s' "$PASSWORD" | ahub flow resume <run-id> --secret-input password
+```
+
+- It is read from a pipe or a file. `--input password=...` is refused
+  (`secret_on_command_line`), and a terminal is refused rather than prompted.
+- It is not saved with the run or printed. So it does not survive a pause: a
+  step that needs it afterwards pauses and asks again. One `--secret-input` per
+  command.
+- It may go only in an `http` body or header, a `cmd` step's stdin, or a
+  condition. Anywhere else (`set`, `message`, a prompt, `ask`, `script`, a URL,
+  command arguments) fails `flow validate`, and the engine checks again.
+- If a response repeats it, it is replaced with `[redacted]` before any later
+  step can read it.
+
+**What this does not cover.** Redaction recognises the value as written or as
+JSON writes it, not hashed, encoded, cut short, re-cased or form-encoded. A
+command given it on stdin, and the service that receives it, can keep it
+anywhere. Use `https` for anything but a local service. A very short value may
+also redact ordinary text that happens to match. Example:
+[examples/signup-flow.sh](examples/signup-flow.sh).
+
 **A value put into JSON stays a value.** This covers `http` bodies that are JSON
 and `script` inputs:
 
@@ -429,7 +459,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-405 assertions against a throwaway bkn, a real HTTP provider that echoes its
+416 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
