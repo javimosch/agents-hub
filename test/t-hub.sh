@@ -495,6 +495,15 @@ a flow create --file "$WORK/boomflow.json" >/dev/null
 chk "a failing script takes on_error" "105"    "$(code flow run boomflow)"
 chkin "and says the script failed"    "reported failure" "$(tail -1 "$WORK/err" | python3 -c 'import json,sys;print(json.loads(json.load(sys.stdin)["error"]["suggestions"][1])["messages"][0])')"
 
+# --- values in JSON stay values ----------------------------------------------
+cat >"$WORK/jsonflow.json" <<'FLOW'
+{"name":"jsonflow","inputs":["v"],"start":"s","steps":{
+ "s":{"type":"script","script":"tally","input":"{\"note\":\"{{v}}\"}","var":"t","parse":"json","select":"note","next":"e"},
+ "e":{"type":"end"}}}
+FLOW
+a flow create --file "$WORK/jsonflow.json" >/dev/null
+chk "a hostile value arrives as text"  'x","note":"changed' "$(a flow run jsonflow --input 'v=x","note":"changed' | j data.t)"
+
 # --- the cmd tool -----------------------------------------------------------
 # Flows could always reach the world; agents could only look things up. This
 # closes that, but the argv author changes from a human to a model, so the

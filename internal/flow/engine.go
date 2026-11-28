@@ -266,14 +266,20 @@ func (e *Engine) doIO(ctx context.Context, run *Run, name string, s Step, r Rend
 		var rawURL, body string
 		headers := map[string]string{}
 		if rawURL, err = r.Render(s.URL); err == nil {
-			if body, err = r.Render(s.Body); err == nil {
-				for k, v := range s.Headers {
-					var hv string
-					if hv, err = r.Render(v); err != nil {
-						break
-					}
-					headers[k] = hv
+			// The headers come first: they say what the body is.
+			for k, v := range s.Headers {
+				var hv string
+				if hv, err = r.Render(v); err != nil {
+					break
 				}
+				headers[k] = hv
+			}
+		}
+		if err == nil {
+			if isJSONBody(s.Body, headers) {
+				body, err = r.RenderJSON(s.Body)
+			} else {
+				body, err = r.Render(s.Body)
 			}
 		}
 		if err == nil {
@@ -351,7 +357,7 @@ func (e *Engine) doScript(ctx context.Context, run *Run, name string, s Step, r 
 	}
 	var input any = map[string]any{}
 	if s.Input != "" {
-		rendered, err := r.Render(s.Input)
+		rendered, err := r.RenderJSON(s.Input)
 		if err != nil {
 			e.fail(run, name+": "+err.Error())
 			return

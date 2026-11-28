@@ -46,7 +46,7 @@ mean proven free of bugs.
 
 | Signal | 2026-11-27 |
 |---|---|
-| Live suite (`test/t-hub.sh`) | 404 passed, 0 failed |
+| Live suite (`test/t-hub.sh`) | 405 passed, 0 failed |
 | Unit coverage: `eval` / `provider` / `flow` / `hub` | 76% / 54% / 46% / 24% |
 | No unit tests | `bkn`, `out`; `update` and the CLI are tested for their spec behaviour, not every command |
 | TDD | mandatory from 2026-11-27; older code is not yet covered |
@@ -61,4 +61,4 @@ a test that has been seen to fail.
 | 2026-09-09 | Chat over bkn, memory and skills, tool loop, flows, schedules, evals, jobs, compaction, self-update |
 | 2026-09-10 | Fixes for unattended runs; flow working directory and run read-back |
 | 2026-11-27 | Review found and fixed three bugs: history cut at 50 rows, `max_steps` leaving threads unresumable, failed turns not counted. TDD became mandatory. Fixed guide and `help-json` drift, and a `thread list --agent` filter that was silently ignored, now held by tests. Added argument rules for `cmd` and jobs. Aligned to the output, guide, update and feedback specs; `--help` no longer runs commands. Fixed timeouts that children could outlast, including a memgraph call that could hang for good |
-| 2026-11-28 | `chat --stream` reports the thread and tool activity. The first dry run of an unattended job showed that a schedule which could not start left no record and kept its lease, so later ticks exited 0. Crash tests (a real `kill -9`, two turns at once) led to leases on threads and schedules, and replay that repairs cut-off tool exchanges. Commands now get a minimal environment; a thread can be turned into an eval case |
+| 2026-11-28 | `chat --stream` reports the thread and tool activity. The first dry run of an unattended job showed that a schedule which could not start left no record and kept its lease, so later ticks exited 0. Crash tests (a real `kill -9`, two turns at once) led to leases on threads and schedules, and replay that repairs cut-off tool exchanges. Commands now get a minimal environment; a thread can be turned into an eval case. A sign-up spike showed that values could change the shape of a JSON body; they are now escaped |

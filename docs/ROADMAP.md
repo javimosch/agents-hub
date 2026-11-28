@@ -23,6 +23,7 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 | `schedule show`, `run` and others still take the schedule's name through `--agent`, a leftover that reads as an agent filter | from reading |
 | Flow and `cmd` output is capped only after it has all been captured in memory | from reading |
 | `schedule runs` leaves out the answer, error and tool calls, and no command shows one run | reproduced |
+| A flow value is put into a URL without escaping, so it can add query parameters | from reading |
 | A flag value that is not a number (`--limit abc`, `--daily-token-budget 5k`) is silently ignored; it should exit 85 | from reading |
 | Updates are not signed, and an older build counts as an update | from reading |
 | `IsLoopbackHost` is never called: wire it in or remove it | from reading |

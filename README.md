@@ -235,6 +235,23 @@ step sets `<var>`, `<var>_code` and `<var>_err` for exactly that.
 exits 92 with the resume command; `ahub flow resume <id> --input k=v`
 continues it, from another machine or another day if you like.
 
+**A value put into JSON stays a value.** This covers `http` bodies that are JSON
+and `script` inputs:
+
+| In the template | What the value may be |
+|---|---|
+| inside quotes, `{"email":"{{email}}"}` | any text; it is escaped |
+| outside quotes, `{"count":{{n}}}` | one number, `true`, `false`, `null` or quoted string; anything else fails the step and nothing is sent |
+| the whole template, `{{document}}` | anything; the value is the document |
+
+A body counts as JSON when its `Content-Type` says so, or when none is set and it
+starts with `{` or `[`. URLs and other bodies are substituted as plain text, so
+do not put untrusted values in them.
+
+> **Upgrading from 0.14.0 or earlier:** values were pasted in as they were, so
+> untrusted input could add fields. A flow that pasted a JSON fragment into a
+> larger template now fails that step.
+
 **The allowlists live in your profile, never in the flow.** A definition is
 data — possibly data a model wrote — so a flow able to name its own
 executables would be arbitrary code execution with extra steps. Secrets work
@@ -412,7 +429,7 @@ streamed; `ahub thread show` has it.
 go build -o bin/ahub . && bash test/t-hub.sh
 ```
 
-404 assertions against a throwaway bkn, a real HTTP provider that echoes its
+405 assertions against a throwaway bkn, a real HTTP provider that echoes its
 prompt back, and a stand-in memgraph. Nothing inside the binary under test is
 mocked, so history replay, the system prompt, the memory block and the skill
 block are each proved to reach the model rather than assumed — including one
