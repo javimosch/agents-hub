@@ -30,6 +30,6 @@ your own profile out of it, point `AHUB_PROFILE` at a spare one.
 **A model is not deterministic.** A script can fail because the model did not do
 what was asked. The message says which of the two happened where it can tell.
 These were last checked on 2026-11-28; the three that call a model used
-`z-ai/glm-5.3-flash`. `signup-flow.sh` needs `ahub` newer than 0.14.1, listens
+`z-ai/glm-5.3-flash`. `signup-flow.sh` needs `ahub` 0.15.0 or later, listens
 on port 8765, allows host `127.0.0.1` while it runs, and removes its flow. Its
 finished runs stay as history.

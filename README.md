@@ -702,7 +702,7 @@ trust.
   untested. Windows does not build.
 - **Tests:** many parts have no unit tests yet.
 
-## What v0.14 is not
+## What v0.15 is not
 
 No MCP gateway (set aside deliberately: a CLI is a better integration surface
 in 2026), no sub-agents, and no OpenAPI import yet — with `curl` allowlisted by
