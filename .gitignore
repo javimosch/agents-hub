@@ -1,5 +1,7 @@
 /bin/
 /ahub
+# Experiments stay local. A validated one is rewritten as an example.
+/spikes/
 *.db
 *.db-shm
 *.db-wal

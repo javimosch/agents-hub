@@ -37,8 +37,7 @@ and nobody has reproduced it yet: reproduce it first, and drop it if you can't.
 ## Later: pulled by real use
 
 - A second provider implementation, when a vendor's shape demands it.
-- A sandbox for permitted commands, if its mounts and network can be settled
-  (see `spikes/c-sandbox`).
+- A sandbox for permitted commands, if its mounts and network can be settled. `bubblewrap` hid the profile and other processes, but not the network.
 - Prompt improvement from failed eval runs, scored against the run it came from.
 - OpenAPI import, only if allowlisted `curl` proves too little.
 

@@ -16,6 +16,12 @@ Every behaviour change starts with a failing test. **Read
 `.agents/skills/ahub-tdd/SKILL.md` before changing code**: red-green-refactor,
 the test doubles, and the hygiene rules.
 
+## Spikes and examples
+
+An experiment lives in `spikes/`, which git ignores: never commit or push it.
+Once it is validated (tests, and a run with a real model), write it up as a
+runnable, documented example in `examples/`, and commit that.
+
 ## Layout
 
 | Path | What |
@@ -29,6 +35,7 @@ the test doubles, and the hygiene rules.
 | `internal/provider` | the model layer: one interface, one OpenAI-compatible impl |
 | `internal/out` | cli-output-spec plumbing (a deliberate copy of bkn's) |
 | `internal/guide` | the embedded guide; edit `guide.json`, not the renderer |
+| `examples/` | validated, runnable examples |
 | `test/t-hub.sh` | the live suite; `test/fake-provider.py` is the echoing model |
 
 Keep files under 500 LOC. Split rather than grow — the same rule the source

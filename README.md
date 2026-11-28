@@ -524,6 +524,9 @@ ahub eval compare <before> <after>
 
 ### Turn a bad run into a case
 
+A runnable version is in [examples/](examples/README.md), beside ones for
+command limits and for resuming after a crash.
+
 ```sh
 ahub eval create --from-thread <id> --name quality \
   --case checks-the-disk --expect tool_used=cmd --expect 'not_contains=probably'
